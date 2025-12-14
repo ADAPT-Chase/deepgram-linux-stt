@@ -70,6 +70,9 @@ class STTIndicator:
         self.root.bind("<ButtonRelease-1>", self._on_drag_stop)
         self.root.bind("<B1-Motion>", self._on_drag_motion)
 
+        # CRITICAL: Keep window always on top - re-raise periodically
+        self._keep_on_top()
+
         # Status indicator frame
         self.status_frame = tk.Frame(self.root, width=120, height=80, bg="#2b2b2b")
         self.status_frame.pack(padx=20, pady=10)
@@ -127,12 +130,24 @@ class STTIndicator:
         """Toggle listening on right-click"""
         self._toggle_listening()
 
+    def _keep_on_top(self):
+        """Keep window always on top by re-raising it periodically"""
+        try:
+            self.root.lift()
+            self.root.attributes('-topmost', True)
+        except:
+            pass
+        # Schedule next check in 100ms
+        self.root.after(100, self._keep_on_top)
+
     def _unfocus_after_click(self, event):
         """Unfocus indicator window after click - simplified approach"""
-        # Simply lower and raise to try to remove focus
+        # Simply lower and raise to try to remove focus - but keep on top
         try:
             self.root.lower()
+            time.sleep(0.01)  # Tiny delay
             self.root.lift()
+            self.root.attributes('-topmost', True)
         except:
             pass  # Ignore errors
 
@@ -672,14 +687,18 @@ class STTIndicator:
 
     def _on_key_press(self, key):
         """Handle key press events"""
+        # Skip processing if we're currently typing
+        if self.is_typing:
+            return
+
         print(f"DEBUG: Key pressed: {key}", flush=True)
+
         if key == keyboard.Key.alt:
             print("DEBUG: ALT key detected!", flush=True)
             if not self.is_listening:
                 print("=== HOLD ALT TO START TRANSCRIBING ===", flush=True)
-                # Small delay to ensure focus is on the target window
-                self.root.after(100, self._start_listening)
-                # Do NOT change transparency - keep it bright
+                # Immediate start - no delay
+                self._start_listening()
                 print(
                     "=== SPEAK NOW - Words will type where your cursor is ===",
                     flush=True,
@@ -691,6 +710,19 @@ class STTIndicator:
             print(f"DEBUG: Checking for Ctrl+Space: {key}", flush=True)
         else:
             print(f"Other key pressed: {key}", flush=True)
+
+    def _on_key_release(self, key):
+        """Handle key release events"""
+        # Skip processing if we're currently typing
+        if self.is_typing:
+            return
+
+        print(f"Key released: {key}", flush=True)
+        if key == keyboard.Key.alt and self.is_listening:
+            # Stop listening when ALT is released (press-and-hold mode)
+            print("=== RELEASED ALT - STOPPED LISTENING ===", flush=True)
+            self._stop_listening()
+            print("=== Click into a text box, then HOLD ALT and speak ===", flush=True)
 
     def _on_key_release(self, key):
         """Handle key release events"""
