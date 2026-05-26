@@ -45,6 +45,10 @@ class SttConfig:
     silence_ms: int
     min_speech_ms: int
     max_segment_ms: int
+    beam_size: int
+    vad_filter: bool
+    condition_on_previous_text: bool
+    no_speech_threshold: float
     type_text: bool
     hotkey_enabled: bool
     state_path: Path
@@ -67,6 +71,10 @@ def load_config() -> SttConfig:
         silence_ms=int(os.getenv("REMOTE_STT_SILENCE_MS", "900")),
         min_speech_ms=int(os.getenv("REMOTE_STT_MIN_SPEECH_MS", "500")),
         max_segment_ms=int(os.getenv("REMOTE_STT_MAX_SEGMENT_MS", "12000")),
+        beam_size=int(os.getenv("REMOTE_STT_BEAM_SIZE", "1")),
+        vad_filter=os.getenv("REMOTE_STT_VAD_FILTER", "1") == "1",
+        condition_on_previous_text=os.getenv("REMOTE_STT_CONDITION_PREVIOUS", "0") == "1",
+        no_speech_threshold=float(os.getenv("REMOTE_STT_NO_SPEECH_THRESHOLD", "0.6")),
         type_text=os.getenv("REMOTE_STT_TYPE_TEXT", "0") == "1",
         hotkey_enabled=os.getenv("REMOTE_STT_HOTKEY", "ctrl+space") != "off",
         state_path=Path(
@@ -411,7 +419,7 @@ def start_capture(source: str) -> subprocess.Popen[bytes]:
     return subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-def transcribe_audio(model: WhisperModel, pcm: bytes) -> str:
+def transcribe_audio(model: WhisperModel, pcm: bytes, config: SttConfig) -> str:
     """Transcribe signed 16-bit mono PCM bytes with faster-whisper."""
 
     if not pcm:
@@ -423,11 +431,11 @@ def transcribe_audio(model: WhisperModel, pcm: bytes) -> str:
 
     segments, _info = model.transcribe(
         samples,
-        beam_size=1,
+        beam_size=config.beam_size,
         language="en",
-        vad_filter=True,
-        condition_on_previous_text=False,
-        no_speech_threshold=0.6,
+        vad_filter=config.vad_filter,
+        condition_on_previous_text=config.condition_on_previous_text,
+        no_speech_threshold=config.no_speech_threshold,
     )
     return " ".join(segment.text.strip() for segment in segments).strip()
 
@@ -555,7 +563,7 @@ def main() -> int:
                 speech_chunks = 0
                 silence_chunks = 0
 
-                transcript = transcribe_audio(model, pcm)
+                transcript = transcribe_audio(model, pcm, config)
                 append_transcript(config.log_path, transcript)
                 if hotkey_controller.enabled():
                     type_transcript(transcript)
