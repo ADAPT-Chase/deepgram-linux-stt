@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import audioop
 import os
+import io
 import signal
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import threading
 import time
 import tkinter as tk
 import tempfile
+import wave
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -20,6 +22,7 @@ from pathlib import Path
 signal.signal(signal.SIGUSR1, signal.SIG_IGN)
 
 import numpy as np
+import requests
 from faster_whisper import WhisperModel
 from pynput import keyboard
 
@@ -39,7 +42,11 @@ class SttConfig:
     """Runtime configuration for remote microphone transcription."""
 
     source: str
+    provider: str
     model_name: str
+    deepgram_model: str
+    deepgram_key_envs: tuple[str, ...]
+    local_fallback: bool
     log_path: Path
     threshold: int
     silence_ms: int
@@ -63,7 +70,18 @@ def load_config() -> SttConfig:
 
     return SttConfig(
         source=os.getenv("REMOTE_STT_SOURCE", "nx_client_mic"),
+        provider=os.getenv("REMOTE_STT_PROVIDER", "local"),
         model_name=os.getenv("REMOTE_STT_MODEL", "tiny.en"),
+        deepgram_model=os.getenv("REMOTE_STT_DEEPGRAM_MODEL", "nova-3"),
+        deepgram_key_envs=tuple(
+            key.strip()
+            for key in os.getenv(
+                "REMOTE_STT_DEEPGRAM_KEY_ENVS",
+                "DEEPGRAM_API_KEY,DEEPGRAM_API_KEY_nc",
+            ).split(",")
+            if key.strip()
+        ),
+        local_fallback=os.getenv("REMOTE_STT_LOCAL_FALLBACK", "0") == "1",
         log_path=Path(
             os.getenv("REMOTE_STT_LOG", "/adapt/projects/stt/remote_transcriptions.txt")
         ),
@@ -419,7 +437,31 @@ def start_capture(source: str) -> subprocess.Popen[bytes]:
     return subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-def transcribe_audio(model: WhisperModel, pcm: bytes, config: SttConfig) -> str:
+def transcribe_audio(model: WhisperModel | None, pcm: bytes, config: SttConfig) -> str:
+    """Transcribe signed 16-bit mono PCM bytes with the configured provider."""
+
+    if config.provider == "deepgram":
+        transcript = transcribe_with_deepgram(pcm, config)
+        if transcript:
+            return transcript
+        if not config.local_fallback:
+            return ""
+        print("Deepgram returned no transcript; falling back to local STT", flush=True)
+
+    if model is None:
+        model = WhisperModel(config.model_name, device="cpu", compute_type="int8")
+
+    if model is None:
+        return ""
+
+    return transcribe_with_faster_whisper(model, pcm, config)
+
+
+def transcribe_with_faster_whisper(
+    model: WhisperModel,
+    pcm: bytes,
+    config: SttConfig,
+) -> str:
     """Transcribe signed 16-bit mono PCM bytes with faster-whisper."""
 
     if not pcm:
@@ -438,6 +480,83 @@ def transcribe_audio(model: WhisperModel, pcm: bytes, config: SttConfig) -> str:
         no_speech_threshold=config.no_speech_threshold,
     )
     return " ".join(segment.text.strip() for segment in segments).strip()
+
+
+def transcribe_with_deepgram(pcm: bytes, config: SttConfig) -> str:
+    """Transcribe signed 16-bit mono PCM bytes with Deepgram prerecorded STT."""
+
+    if not pcm:
+        return ""
+
+    wav_bytes = pcm_to_wav_bytes(pcm)
+    url = "https://api.deepgram.com/v1/listen"
+    params = {
+        "model": config.deepgram_model,
+        "language": "en-US",
+        "smart_format": "true",
+        "punctuate": "true",
+        "dictation": "true",
+        "paragraphs": "false",
+        "utterances": "false",
+    }
+    headers = {"Content-Type": "audio/wav"}
+
+    for key_env in config.deepgram_key_envs:
+        api_key = os.getenv(key_env)
+        if not api_key:
+            continue
+
+        try:
+            response = requests.post(
+                url,
+                params=params,
+                headers={**headers, "Authorization": f"Token {api_key}"},
+                data=wav_bytes,
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            print(f"Deepgram request failed via {key_env}: {exc}", file=sys.stderr, flush=True)
+            continue
+
+        if response.status_code in {401, 402, 403, 429}:
+            print(
+                f"Deepgram key {key_env} rejected with HTTP {response.status_code}; trying next key",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+
+        if response.status_code >= 400:
+            print(
+                f"Deepgram request failed with HTTP {response.status_code}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+
+        try:
+            payload = response.json()
+            channels = payload["results"]["channels"]
+            alternatives = channels[0]["alternatives"]
+            transcript = alternatives[0].get("transcript", "")
+            return transcript.strip()
+        except (KeyError, IndexError, ValueError, TypeError) as exc:
+            print(f"Deepgram response parse failed: {exc}", file=sys.stderr, flush=True)
+            return ""
+
+    return ""
+
+
+def pcm_to_wav_bytes(pcm: bytes) -> bytes:
+    """Wrap raw signed 16-bit mono PCM bytes in a WAV container."""
+
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav_file:
+        wav_file.setnchannels(CHANNELS)
+        wav_file.setsampwidth(SAMPLE_WIDTH_BYTES)
+        wav_file.setframerate(SAMPLE_RATE)
+        wav_file.writeframes(pcm)
+    return output.getvalue()
 
 
 def append_transcript(log_path: Path, transcript: str) -> None:
@@ -486,14 +605,18 @@ def main() -> int:
         state_path=config.state_path,
         readback_enabled=config.readback_enabled,
     )
+    model_label = config.deepgram_model if config.provider == "deepgram" else config.model_name
     print(
         "Remote STT starting "
-        f"source={config.source} model={config.model_name} log={config.log_path} "
-        f"typing={'on' if config.type_text else 'muted'} state={config.state_path}",
+        f"source={config.source} provider={config.provider} model={model_label} "
+        f"log={config.log_path} typing={'on' if config.type_text else 'muted'} "
+        f"state={config.state_path}",
         flush=True,
     )
 
-    model = WhisperModel(config.model_name, device="cpu", compute_type="int8")
+    model = None
+    if config.provider != "deepgram":
+        model = WhisperModel(config.model_name, device="cpu", compute_type="int8")
     capture = start_capture(config.source)
     listener = start_hotkey_listener(hotkey_controller) if config.hotkey_enabled else None
     running = True
