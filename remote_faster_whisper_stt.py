@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import tkinter as tk
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -43,6 +44,7 @@ class SttConfig:
     type_text: bool
     hotkey_enabled: bool
     state_path: Path
+    readback_enabled: bool
 
 
 def load_config() -> SttConfig:
@@ -63,15 +65,17 @@ def load_config() -> SttConfig:
         state_path=Path(
             os.getenv("REMOTE_STT_STATE", f"/run/user/{os.getuid()}/remote-stt.state")
         ),
+        readback_enabled=os.getenv("REMOTE_STT_READBACK", "1") == "1",
     )
 
 
-class TypingController:
-    """Thread-safe text injection gate with hotkey and signal toggles."""
+class HotkeyController:
+    """Thread-safe STT controls with typing and readback hotkeys."""
 
-    def __init__(self, enabled: bool, state_path: Path) -> None:
+    def __init__(self, enabled: bool, state_path: Path, readback_enabled: bool) -> None:
         self._enabled = enabled
         self._state_path = state_path
+        self._readback_enabled = readback_enabled
         self._lock = threading.Lock()
         self._pressed: set[keyboard.Key | keyboard.KeyCode] = set()
         self._write_state(enabled)
@@ -103,22 +107,26 @@ class TypingController:
                 return
             self._pressed.add(key)
 
-            ctrl_down = (
-                keyboard.Key.ctrl in self._pressed
-                or keyboard.Key.ctrl_l in self._pressed
-                or keyboard.Key.ctrl_r in self._pressed
-            )
-            if ctrl_down and key == keyboard.Key.space:
+            ctrl_down = self._ctrl_down()
+            shift_down = self._shift_down()
+            if ctrl_down and shift_down and key == keyboard.Key.space:
+                readback = self._readback_enabled
+                enabled = None
+            elif ctrl_down and not shift_down and key == keyboard.Key.space:
                 self._enabled = not self._enabled
                 enabled = self._enabled
+                readback = False
             else:
                 enabled = None
+                readback = False
 
         if enabled is not None:
             state = "unmuted" if enabled else "muted"
             print(f"Remote STT typing {state} by Ctrl+Space", flush=True)
             self._write_state(enabled)
             notify_state(enabled)
+        elif readback:
+            threading.Thread(target=read_selected_text, daemon=True).start()
 
     def on_release(self, key: keyboard.Key | keyboard.KeyCode) -> None:
         """Track key releases for hotkey debounce."""
@@ -129,6 +137,20 @@ class TypingController:
     def _write_state(self, enabled: bool) -> None:
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._state_path.write_text("on\n" if enabled else "muted\n", encoding="utf-8")
+
+    def _ctrl_down(self) -> bool:
+        return (
+            keyboard.Key.ctrl in self._pressed
+            or keyboard.Key.ctrl_l in self._pressed
+            or keyboard.Key.ctrl_r in self._pressed
+        )
+
+    def _shift_down(self) -> bool:
+        return (
+            keyboard.Key.shift in self._pressed
+            or keyboard.Key.shift_l in self._pressed
+            or keyboard.Key.shift_r in self._pressed
+        )
 
 
 def notify_state(enabled: bool) -> None:
@@ -143,8 +165,108 @@ def notify_state(enabled: bool) -> None:
     )
 
 
-def start_hotkey_listener(controller: TypingController) -> keyboard.Listener | None:
-    """Start the Ctrl+Space hotkey listener when the X session is reachable."""
+def read_selected_text() -> None:
+    """Read highlighted text aloud using the X11 selection or clipboard fallback."""
+
+    notify_message("NoMachine remote STT", "Reading selected text")
+    text = selected_text()
+    if not text:
+        notify_message("NoMachine remote STT", "No selected text found")
+        print("Remote STT readback: no selected text found", flush=True)
+        return
+
+    max_chars = int(os.getenv("REMOTE_STT_READBACK_MAX_CHARS", "5000"))
+    text = " ".join(text.split())[:max_chars]
+    print(f"Remote STT readback: {len(text)} chars", flush=True)
+    speak_text(text)
+
+
+def selected_text() -> str:
+    """Return highlighted X11 text without requiring xclip/xsel."""
+
+    text = primary_selection_text()
+    if text:
+        return text
+    return clipboard_selection_text()
+
+
+def primary_selection_text() -> str:
+    """Read the X11 PRIMARY selection, which usually tracks highlighted text."""
+
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        return root.selection_get(selection="PRIMARY").strip()
+    except Exception:
+        return ""
+    finally:
+        if root is not None:
+            root.destroy()
+
+
+def clipboard_selection_text() -> str:
+    """Copy selected text, read the clipboard, then restore the previous clipboard."""
+
+    root = None
+    previous = ""
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            previous = root.clipboard_get()
+        except Exception:
+            previous = ""
+
+        subprocess.run(
+            ["xdotool", "key", "--clearmodifiers", "ctrl+c"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(0.15)
+
+        try:
+            copied = root.clipboard_get().strip()
+        except Exception:
+            copied = ""
+
+        root.clipboard_clear()
+        if previous:
+            root.clipboard_append(previous)
+        root.update()
+        return copied if copied != previous else ""
+    finally:
+        if root is not None:
+            root.destroy()
+
+
+def speak_text(text: str) -> None:
+    """Speak text using speech-dispatcher when available, otherwise espeak."""
+
+    if not text:
+        return
+
+    command = os.getenv("REMOTE_STT_TTS_CMD", "spd-say")
+    if command == "spd-say":
+        subprocess.run(["spd-say", "--wait", text], check=False)
+    else:
+        subprocess.run(["espeak", text], check=False)
+
+
+def notify_message(title: str, message: str) -> None:
+    """Show a desktop notification when notify-send is available."""
+
+    subprocess.run(
+        ["notify-send", "-t", "1200", title, message],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def start_hotkey_listener(controller: HotkeyController) -> keyboard.Listener | None:
+    """Start desktop hotkeys when the X session is reachable."""
 
     try:
         listener = keyboard.Listener(
@@ -152,7 +274,11 @@ def start_hotkey_listener(controller: TypingController) -> keyboard.Listener | N
             on_release=controller.on_release,
         )
         listener.start()
-        print("Remote STT hotkey enabled: Ctrl+Space toggles typing", flush=True)
+        print(
+            "Remote STT hotkeys enabled: Ctrl+Space toggles typing; "
+            "Ctrl+Shift+Space reads selected text",
+            flush=True,
+        )
         return listener
     except Exception as exc:
         print(f"Remote STT hotkey unavailable: {exc}", file=sys.stderr, flush=True)
@@ -235,9 +361,10 @@ def main() -> int:
     """Run continuous speech segmentation and transcription."""
 
     config = load_config()
-    typing_controller = TypingController(
+    hotkey_controller = HotkeyController(
         enabled=config.type_text,
         state_path=config.state_path,
+        readback_enabled=config.readback_enabled,
     )
     print(
         "Remote STT starting "
@@ -248,7 +375,7 @@ def main() -> int:
 
     model = WhisperModel(config.model_name, device="cpu", compute_type="int8")
     capture = start_capture(config.source)
-    listener = start_hotkey_listener(typing_controller) if config.hotkey_enabled else None
+    listener = start_hotkey_listener(hotkey_controller) if config.hotkey_enabled else None
     running = True
 
     def handle_signal(_signum: int, _frame: object) -> None:
@@ -256,7 +383,7 @@ def main() -> int:
         running = False
 
     def toggle_typing(_signum: int, _frame: object) -> None:
-        typing_controller.toggle()
+        hotkey_controller.toggle()
 
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
@@ -311,7 +438,7 @@ def main() -> int:
 
                 transcript = transcribe_audio(model, pcm)
                 append_transcript(config.log_path, transcript)
-                if typing_controller.enabled():
+                if hotkey_controller.enabled():
                     type_transcript(transcript)
 
     finally:
