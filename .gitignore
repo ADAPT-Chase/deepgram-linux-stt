@@ -34,6 +34,7 @@ deepgram-python-sdk/
 # Logs
 *.log
 transcriptions.txt
+remote_transcriptions.txt
 
 # IDE
 .vscode/
