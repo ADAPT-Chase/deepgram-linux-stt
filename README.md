@@ -64,6 +64,24 @@ python deepgram_stt.py
 
 ## Usage
 
+### Deepgram Voice Agent GUI
+
+The local voice-agent GUI is served by a user systemd service:
+
+```bash
+systemctl --user status deepgram-voice-agent-gui.service
+```
+
+Open the GUI from the NoMachine desktop:
+
+```text
+http://127.0.0.1:18087/
+```
+
+The page keeps the Deepgram key server-side, streams browser microphone PCM to
+Deepgram Voice Agent, and plays the returned neural voice audio. The **Mute**
+button stops sending microphone frames while the connection remains open.
+
 ### Basic Controls
 
 - **Hold ALT**: Starts listening (indicator turns green)
