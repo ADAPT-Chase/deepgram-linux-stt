@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import tempfile
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,6 +29,9 @@ CHANNELS = 1
 SAMPLE_WIDTH_BYTES = 2
 CHUNK_MS = 100
 CHUNK_BYTES = SAMPLE_RATE * CHANNELS * SAMPLE_WIDTH_BYTES * CHUNK_MS // 1000
+READBACK_ACTIVE = threading.Event()
+TTS_PROCESS_LOCK = threading.Lock()
+TTS_PROCESS: subprocess.Popen[bytes] | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,9 @@ class SttConfig:
     hotkey_enabled: bool
     state_path: Path
     readback_enabled: bool
+    readback_max_chars: int
+    tts_command: str
+    tts_voice: str
 
 
 def load_config() -> SttConfig:
@@ -66,6 +73,12 @@ def load_config() -> SttConfig:
             os.getenv("REMOTE_STT_STATE", f"/run/user/{os.getuid()}/remote-stt.state")
         ),
         readback_enabled=os.getenv("REMOTE_STT_READBACK", "1") == "1",
+        readback_max_chars=int(os.getenv("REMOTE_STT_READBACK_MAX_CHARS", "1200")),
+        tts_command=os.getenv(
+            "REMOTE_STT_TTS_CMD",
+            "/data/vast/home/x/.hermes/hermes-agent/venv/bin/edge-tts",
+        ),
+        tts_voice=os.getenv("REMOTE_STT_TTS_VOICE", "en-US-AvaMultilingualNeural"),
     )
 
 
@@ -127,6 +140,8 @@ class HotkeyController:
             notify_state(enabled)
         elif readback:
             threading.Thread(target=read_selected_text, daemon=True).start()
+        elif ctrl_down and shift_down and key == keyboard.Key.space:
+            notify_message("NoMachine remote STT", "Readback disabled")
 
     def on_release(self, key: keyboard.Key | keyboard.KeyCode) -> None:
         """Track key releases for hotkey debounce."""
@@ -168,6 +183,13 @@ def notify_state(enabled: bool) -> None:
 def read_selected_text() -> None:
     """Read highlighted text aloud using the X11 selection or clipboard fallback."""
 
+    if READBACK_ACTIVE.is_set():
+        stop_speech()
+        READBACK_ACTIVE.clear()
+        notify_message("NoMachine remote STT", "Readback stopped")
+        print("Remote STT readback stopped", flush=True)
+        return
+
     notify_message("NoMachine remote STT", "Reading selected text")
     text = selected_text()
     if not text:
@@ -175,7 +197,7 @@ def read_selected_text() -> None:
         print("Remote STT readback: no selected text found", flush=True)
         return
 
-    max_chars = int(os.getenv("REMOTE_STT_READBACK_MAX_CHARS", "5000"))
+    max_chars = int(os.getenv("REMOTE_STT_READBACK_MAX_CHARS", "1200"))
     text = " ".join(text.split())[:max_chars]
     print(f"Remote STT readback: {len(text)} chars", flush=True)
     speak_text(text)
@@ -242,16 +264,106 @@ def clipboard_selection_text() -> str:
 
 
 def speak_text(text: str) -> None:
-    """Speak text using speech-dispatcher when available, otherwise espeak."""
+    """Speak text with Edge neural TTS when available, otherwise speech-dispatcher."""
 
     if not text:
         return
 
-    command = os.getenv("REMOTE_STT_TTS_CMD", "spd-say")
-    if command == "spd-say":
-        subprocess.run(["spd-say", "--wait", text], check=False)
-    else:
-        subprocess.run(["espeak", text], check=False)
+    READBACK_ACTIVE.set()
+    try:
+        command = os.getenv(
+            "REMOTE_STT_TTS_CMD",
+            "/data/vast/home/x/.hermes/hermes-agent/venv/bin/edge-tts",
+        )
+        if command.endswith("edge-tts"):
+            speak_with_edge_tts(command, text)
+        elif command == "spd-say":
+            run_tts_process(["spd-say", "--wait", text])
+        else:
+            run_tts_process(["espeak", text])
+    finally:
+        READBACK_ACTIVE.clear()
+
+
+def speak_with_edge_tts(command: str, text: str) -> None:
+    """Generate speech with Edge neural TTS and play it through PipeWire/Pulse."""
+
+    voice = os.getenv("REMOTE_STT_TTS_VOICE", "en-US-AvaMultilingualNeural")
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as media:
+        media_path = Path(media.name)
+
+    try:
+        synth = subprocess.run(
+            [
+                command,
+                "--voice",
+                voice,
+                "--text",
+                text,
+                "--write-media",
+                str(media_path),
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if synth.returncode != 0:
+            print(
+                f"Edge TTS failed, falling back to spd-say: {synth.stderr.strip()}",
+                file=sys.stderr,
+                flush=True,
+            )
+            run_tts_process(["spd-say", "--wait", text])
+            return
+
+        player_command = (
+            f"ffmpeg -nostdin -loglevel error -i {str(media_path)!r} "
+            "-f s16le -ar 24000 -ac 1 - | "
+            "pacat --playback --raw --format=s16le --rate=24000 --channels=1"
+        )
+        run_tts_process(["bash", "-lc", player_command])
+    finally:
+        media_path.unlink(missing_ok=True)
+
+
+def run_tts_process(command: list[str]) -> None:
+    """Run one TTS/playback process, replacing any previous readback."""
+
+    global TTS_PROCESS
+    stop_speech()
+    with TTS_PROCESS_LOCK:
+        TTS_PROCESS = subprocess.Popen(command)
+        process = TTS_PROCESS
+
+    try:
+        process.wait(timeout=90)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        process.wait(timeout=3)
+    finally:
+        with TTS_PROCESS_LOCK:
+            if TTS_PROCESS is process:
+                TTS_PROCESS = None
+
+
+def stop_speech() -> None:
+    """Stop active readback playback."""
+
+    global TTS_PROCESS
+    with TTS_PROCESS_LOCK:
+        process = TTS_PROCESS
+        TTS_PROCESS = None
+
+    if process is None or process.poll() is not None:
+        return
+
+    process.terminate()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=2)
 
 
 def notify_message(title: str, message: str) -> None:
@@ -405,6 +517,13 @@ def main() -> int:
                 stderr = capture.stderr.read().decode("utf-8", errors="replace") if capture.stderr else ""
                 print(f"Capture ended unexpectedly: {stderr.strip()}", file=sys.stderr, flush=True)
                 return 1
+
+            if READBACK_ACTIVE.is_set():
+                speech.clear()
+                pre_roll.clear()
+                silence_chunks = 0
+                speech_chunks = 0
+                continue
 
             rms = audioop.rms(chunk, SAMPLE_WIDTH_BYTES)
             has_voice = rms >= config.threshold
