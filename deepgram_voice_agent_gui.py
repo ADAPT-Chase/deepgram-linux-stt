@@ -12,12 +12,15 @@ import json
 import logging
 import os
 import re
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import nats
 import uvicorn
 import websockets
-from fastapi import FastAPI, WebSocket
+from fastapi import Request, FastAPI, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 
@@ -32,6 +35,10 @@ DEFAULT_THINK_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_THINK_MODEL = "deepseek-v4-flash"
 DEFAULT_PROXY_AUTH_KEY_ENVS = ("sage_20500_gateway_token",)
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
+DEFAULT_DB_SECRET_FILE = Path("/adapt/secrets/db.env")
+ROSTER_PATH = Path("/adapt/platform/novaops/controlplane/pipecat-voice/roster.json")
+NOVA_SUBJECT_NS = "nova"
+NATS_SENDER = "voice-agent-gui"
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
 ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$")
@@ -144,6 +151,156 @@ def proxy_auth_token() -> str:
     return load_secret_from_file(secret_file, key_envs)
 
 
+def nats_url() -> str:
+    """Resolve the NATS URL without exposing it to the browser."""
+
+    value = os.environ.get("NATS_URL", "").strip()
+    if value:
+        return value
+    return load_secret_from_file(DEFAULT_DB_SECRET_FILE, ("NATS_URL",))
+
+
+def roster_agents() -> list[dict[str, Any]]:
+    """Return the public fleet roster used by the voice control panel."""
+
+    try:
+        data = json.loads(ROSTER_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning("Could not read nova roster %s: %s", ROSTER_PATH, exc)
+        return []
+
+    agents: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_agent in data.get("agents", []):
+        if not isinstance(raw_agent, dict):
+            continue
+        name = str(raw_agent.get("profile") or raw_agent.get("name") or "").strip().lower()
+        if not name or name in seen or raw_agent.get("active") is False:
+            continue
+        seen.add(name)
+        agents.append(
+            {
+                "name": name,
+                "label": raw_agent.get("label") or raw_agent.get("name") or name.capitalize(),
+                "tier": raw_agent.get("tier") or "",
+                "domain": raw_agent.get("domain") or "",
+                "voice": raw_agent.get("voice") or "",
+                "description": raw_agent.get("description") or "",
+            }
+        )
+    return agents
+
+
+def _valid_agent_name(name: str) -> str:
+    """Validate a NATS agent segment."""
+
+    normalized = name.strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,48}", normalized):
+        raise ValueError(f"invalid agent name: {name}")
+    return normalized
+
+
+def _nats_message(message: str, reply_to: str | None = None) -> dict[str, Any]:
+    """Build a nova-compatible NATS envelope."""
+
+    now = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "from": NATS_SENDER,
+        "id": f"{NATS_SENDER}:{now}:{uuid.uuid4().hex[:10]}",
+        "message": message,
+        "timestamp": now,
+    }
+    if reply_to:
+        payload["reply_to"] = reply_to
+    return payload
+
+
+async def _nats_roundtrip(agent: str, channel: str, message: str, timeout: float) -> dict[str, Any]:
+    """Publish a NATS message to one agent and collect streamed reply chunks."""
+
+    agent = _valid_agent_name(agent)
+    if channel not in {"direct", "meet"}:
+        raise ValueError("channel must be direct or meet")
+    url = nats_url()
+    if not url:
+        raise RuntimeError("NATS_URL is not configured")
+
+    nc = await nats.connect(url, name="deepgram-voice-agent-gui")
+    reply_to = nc.new_inbox()
+    done = asyncio.Event()
+    chunks: list[str] = []
+    raw_events: list[dict[str, Any]] = []
+
+    async def on_reply(msg) -> None:
+        try:
+            payload = json.loads(msg.data.decode())
+        except Exception:
+            payload = {"chunk": msg.data.decode(errors="replace"), "final": True}
+        raw_events.append(payload)
+        if chunk := payload.get("chunk"):
+            chunks.append(str(chunk))
+        if payload.get("final") or payload.get("message"):
+            if payload.get("message") and not chunks:
+                chunks.append(str(payload["message"]))
+            done.set()
+
+    subscription = await nc.subscribe(reply_to, cb=on_reply)
+    subject = f"{NOVA_SUBJECT_NS}.{agent}.{channel}"
+    await nc.publish(subject, json.dumps(_nats_message(message, reply_to)).encode())
+    await nc.flush()
+
+    try:
+        await asyncio.wait_for(done.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        await subscription.unsubscribe()
+        await nc.drain()
+
+    text = "".join(chunks).strip()
+    return {
+        "agent": agent,
+        "channel": channel,
+        "subject": subject,
+        "reply": text,
+        "timedOut": not bool(text),
+        "events": raw_events[-12:],
+    }
+
+
+async def _nats_ping(agents: list[str], timeout: float) -> list[dict[str, Any]]:
+    """Ping selected novas over NATS."""
+
+    url = nats_url()
+    if not url:
+        raise RuntimeError("NATS_URL is not configured")
+    nc = await nats.connect(url, name="deepgram-voice-agent-gui-ping")
+
+    async def ping_one(agent: str) -> dict[str, Any]:
+        agent = _valid_agent_name(agent)
+        subject = f"{NOVA_SUBJECT_NS}.{agent}.ping"
+        try:
+            msg = await nc.request(subject, b"ping", timeout=timeout)
+            return {
+                "agent": agent,
+                "subject": subject,
+                "online": True,
+                "response": msg.data.decode(errors="replace"),
+            }
+        except Exception as exc:
+            return {
+                "agent": agent,
+                "subject": subject,
+                "online": False,
+                "error": str(exc),
+            }
+
+    try:
+        return await asyncio.gather(*(ping_one(agent) for agent in agents))
+    finally:
+        await nc.drain()
+
+
 def public_config() -> dict[str, Any]:
     """Return non-secret GUI defaults."""
 
@@ -228,6 +385,90 @@ async def api_health() -> JSONResponse:
             "thinkModel": public_config()["thinkModel"],
         }
     )
+
+
+@app.get("/api/nats/agents")
+async def api_nats_agents() -> JSONResponse:
+    """Return public NATS fleet routing data for the GUI."""
+
+    return JSONResponse(
+        {
+            "ok": bool(nats_url()),
+            "subjectNamespace": NOVA_SUBJECT_NS,
+            "agents": roster_agents(),
+        }
+    )
+
+
+@app.post("/api/nats/direct")
+async def api_nats_direct(request: Request) -> JSONResponse:
+    """Send a direct NATS message to one nova and collect its reply."""
+
+    body = await request.json()
+    agent = _valid_agent_name(str(body.get("agent") or "iris"))
+    message = str(body.get("message") or "").strip()
+    if not message:
+        return JSONResponse({"ok": False, "error": "message is required"}, status_code=400)
+    timeout = min(max(float(body.get("timeout") or 45), 5), 120)
+    try:
+        result = await _nats_roundtrip(agent, "direct", message, timeout)
+    except Exception as exc:
+        LOGGER.warning("NATS direct dispatch failed: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    return JSONResponse({"ok": True, "result": result})
+
+
+@app.post("/api/nats/ping")
+async def api_nats_ping(request: Request) -> JSONResponse:
+    """Ping selected novas over NATS."""
+
+    body = await request.json()
+    requested_agents = body.get("agents") or []
+    if not isinstance(requested_agents, list):
+        return JSONResponse({"ok": False, "error": "agents must be a list"}, status_code=400)
+    agents = [_valid_agent_name(str(agent)) for agent in requested_agents[:16]]
+    if not agents:
+        return JSONResponse({"ok": False, "error": "at least one agent is required"}, status_code=400)
+    timeout = min(max(float(body.get("timeout") or 1.2), 0.3), 8)
+    try:
+        results = await _nats_ping(agents, timeout)
+    except Exception as exc:
+        LOGGER.warning("NATS ping failed: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    return JSONResponse({"ok": True, "results": results})
+
+
+@app.post("/api/nats/group")
+async def api_nats_group(request: Request) -> JSONResponse:
+    """Send a room-style NATS message to multiple novas and collect replies."""
+
+    body = await request.json()
+    requested_agents = body.get("agents") or []
+    if not isinstance(requested_agents, list):
+        return JSONResponse({"ok": False, "error": "agents must be a list"}, status_code=400)
+    agents = [_valid_agent_name(str(agent)) for agent in requested_agents[:8]]
+    message = str(body.get("message") or "").strip()
+    if not agents:
+        return JSONResponse({"ok": False, "error": "at least one agent is required"}, status_code=400)
+    if not message:
+        return JSONResponse({"ok": False, "error": "message is required"}, status_code=400)
+    timeout = min(max(float(body.get("timeout") or 60), 5), 120)
+    try:
+        results = await asyncio.gather(
+            *(_nats_roundtrip(agent, "meet", message, timeout) for agent in agents),
+            return_exceptions=True,
+        )
+    except Exception as exc:
+        LOGGER.warning("NATS group dispatch failed: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    payload: list[dict[str, Any]] = []
+    for agent, result in zip(agents, results, strict=False):
+        if isinstance(result, Exception):
+            payload.append({"agent": agent, "error": str(result), "timedOut": True})
+        else:
+            payload.append(result)
+    return JSONResponse({"ok": True, "results": payload})
 
 
 @app.websocket("/ws/voice")
@@ -565,6 +806,40 @@ HTML = """<!doctype html>
     }
     textarea { min-height: 84px; resize: vertical; }
     .textbar { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+    .fleetbar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .agent-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 8px;
+      max-height: 140px;
+      overflow: auto;
+      padding: 8px;
+      background: #0d0f12;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .agent-option {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .agent-option input { width: auto; }
+    .nats-output {
+      min-height: 92px;
+      max-height: 180px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #0d0f12;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.76rem;
+      line-height: 1.42;
+    }
     .events {
       height: 390px;
       overflow: auto;
@@ -665,6 +940,19 @@ HTML = """<!doctype html>
             <button id="sendTextBtn" type="button" disabled>Send</button>
           </div>
         </div>
+        <div class="field">
+          <label for="natsMessage">Nova fleet</label>
+          <div id="agentList" class="agent-list"></div>
+        </div>
+        <div class="field">
+          <textarea id="natsMessage" placeholder="Ask selected novas or send a direct note to one agent"></textarea>
+          <div class="fleetbar">
+            <button id="sendDirectBtn" type="button">Direct</button>
+            <button id="sendGroupBtn" type="button">Group</button>
+          </div>
+          <button id="pingAgentsBtn" type="button">Ping selected</button>
+        </div>
+        <pre id="natsOutput" class="nats-output"></pre>
         <div id="events" class="events" aria-live="polite"></div>
         <div class="meta">
           <span><a id="deepgramLink" href="#" target="_blank" rel="noreferrer">Deepgram docs</a></span>
@@ -684,6 +972,7 @@ HTML = """<!doctype html>
       nextPlayTime: 0,
       muted: false,
       config: null,
+      agents: [],
     };
 
     const $ = (id) => document.getElementById(id);
@@ -695,6 +984,11 @@ HTML = """<!doctype html>
     const stopBtn = $("stopBtn");
     const muteBtn = $("muteBtn");
     const sendTextBtn = $("sendTextBtn");
+    const sendDirectBtn = $("sendDirectBtn");
+    const sendGroupBtn = $("sendGroupBtn");
+    const pingAgentsBtn = $("pingAgentsBtn");
+    const agentList = $("agentList");
+    const natsOutput = $("natsOutput");
     const events = $("events");
 
     function setStatus(kind, text) {
@@ -717,6 +1011,40 @@ HTML = """<!doctype html>
       return String(value).replace(/[&<>"']/g, (ch) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
       }[ch]));
+    }
+
+    function selectedAgents() {
+      return [...agentList.querySelectorAll("input:checked")].map((input) => input.value);
+    }
+
+    function setNatsOutput(value) {
+      natsOutput.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    async function postJson(path, body) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) throw payload;
+      return payload;
+    }
+
+    function renderAgents(agents) {
+      agentList.innerHTML = "";
+      const defaults = new Set(["iris", "vox", "vaeris"]);
+      for (const agent of agents) {
+        const label = document.createElement("label");
+        label.className = "agent-option";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = agent.name;
+        input.checked = defaults.has(agent.name);
+        label.append(input, document.createTextNode(agent.label || agent.name));
+        agentList.append(label);
+      }
     }
 
     function buildSettings() {
@@ -874,6 +1202,71 @@ HTML = """<!doctype html>
       input.value = "";
     }
 
+    async function sendDirectNats() {
+      const agents = selectedAgents();
+      const message = $("natsMessage").value.trim();
+      if (!message) return setNatsOutput("Enter a fleet message first.");
+      if (!agents.length) return setNatsOutput("Select one nova first.");
+      sendDirectBtn.disabled = true;
+      sendGroupBtn.disabled = true;
+      pingAgentsBtn.disabled = true;
+      setNatsOutput(`Sending direct to ${agents[0]}...`);
+      try {
+        const payload = await postJson("/api/nats/direct", { agent: agents[0], message });
+        setNatsOutput(payload.result);
+        logEvent("nats direct", `${agents[0]}: ${payload.result.reply || "(no reply)"}`);
+      } catch (error) {
+        setNatsOutput(error);
+      } finally {
+        sendDirectBtn.disabled = false;
+        sendGroupBtn.disabled = false;
+        pingAgentsBtn.disabled = false;
+      }
+    }
+
+    async function pingSelectedAgents() {
+      const agents = selectedAgents();
+      if (!agents.length) return setNatsOutput("Select at least one nova.");
+      sendDirectBtn.disabled = true;
+      sendGroupBtn.disabled = true;
+      pingAgentsBtn.disabled = true;
+      setNatsOutput(`Pinging ${agents.join(", ")}...`);
+      try {
+        const payload = await postJson("/api/nats/ping", { agents });
+        setNatsOutput(payload.results);
+      } catch (error) {
+        setNatsOutput(error);
+      } finally {
+        sendDirectBtn.disabled = false;
+        sendGroupBtn.disabled = false;
+        pingAgentsBtn.disabled = false;
+      }
+    }
+
+    async function sendGroupNats() {
+      const agents = selectedAgents();
+      const message = $("natsMessage").value.trim();
+      if (!message) return setNatsOutput("Enter a fleet message first.");
+      if (!agents.length) return setNatsOutput("Select at least one nova.");
+      sendDirectBtn.disabled = true;
+      sendGroupBtn.disabled = true;
+      pingAgentsBtn.disabled = true;
+      setNatsOutput(`Sending group message to ${agents.join(", ")}...`);
+      try {
+        const payload = await postJson("/api/nats/group", { agents, message });
+        setNatsOutput(payload.results);
+        for (const result of payload.results || []) {
+          logEvent("nats group", `${result.agent}: ${result.reply || result.error || "(no reply)"}`);
+        }
+      } catch (error) {
+        setNatsOutput(error);
+      } finally {
+        sendDirectBtn.disabled = false;
+        sendGroupBtn.disabled = false;
+        pingAgentsBtn.disabled = false;
+      }
+    }
+
     connectBtn.addEventListener("click", () => connect().catch((err) => {
       logEvent("local error", err.message || String(err));
       teardown("error");
@@ -885,6 +1278,9 @@ HTML = """<!doctype html>
       setStatus(state.muted ? "busy" : "ready", state.muted ? "muted" : "connected");
     });
     sendTextBtn.addEventListener("click", sendTextTurn);
+    sendDirectBtn.addEventListener("click", sendDirectNats);
+    sendGroupBtn.addEventListener("click", sendGroupNats);
+    pingAgentsBtn.addEventListener("click", pingSelectedAgents);
     $("textTurn").addEventListener("keydown", (event) => {
       if (event.key === "Enter") sendTextTurn();
     });
@@ -911,6 +1307,15 @@ HTML = """<!doctype html>
         if (!ready) setStatus("error", "missing key");
       })
       .catch(() => setStatus("error", "health error"));
+
+    fetch("/api/nats/agents")
+      .then((response) => response.json())
+      .then((payload) => {
+        state.agents = payload.agents || [];
+        renderAgents(state.agents);
+        setNatsOutput(payload.ok ? "NATS fleet ready." : "NATS_URL not configured.");
+      })
+      .catch((error) => setNatsOutput(error.message || String(error)));
   </script>
 </body>
 </html>
