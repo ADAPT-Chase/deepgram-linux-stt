@@ -8,6 +8,7 @@ server holds the Deepgram API key and relays frames to the Voice Agent API.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -25,10 +26,10 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 18087
 DEFAULT_SECRET_FILE = Path("/adapt/secrets/m2.env")
 DEFAULT_KEY_ENVS = ("DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY_nc")
+DEFAULT_DEEPSEEK_KEY_ENVS = ("DEEPSEEK_API_KEY",)
 VOICE_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse"
-DEFAULT_THINK_URL = (
-    "https://pipe.adaptdev.ai/v1/chat/completions?peer=vox&channel=direct&mode=solo"
-)
+DEFAULT_THINK_URL = "https://api.deepseek.com/chat/completions"
+DEFAULT_THINK_MODEL = "deepseek-v4-flash"
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
 ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$")
@@ -105,6 +106,24 @@ def deepgram_key() -> str:
     return load_secret_from_file(secret_file, key_envs)
 
 
+def deepseek_key() -> str:
+    """Resolve the DeepSeek API key without printing or exposing it."""
+
+    key_envs = tuple(
+        item.strip()
+        for item in os.environ.get(
+            "VOICE_AGENT_DEEPSEEK_KEY_ENVS", ",".join(DEFAULT_DEEPSEEK_KEY_ENVS)
+        ).split(",")
+        if item.strip()
+    )
+    for name in key_envs:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    secret_file = Path(os.environ.get("VOICE_AGENT_SECRET_FILE", str(DEFAULT_SECRET_FILE)))
+    return load_secret_from_file(secret_file, key_envs)
+
+
 def public_config() -> dict[str, Any]:
     """Return non-secret GUI defaults."""
 
@@ -112,6 +131,8 @@ def public_config() -> dict[str, Any]:
         "app": APP_NAME,
         "voiceAgentUrl": VOICE_AGENT_URL,
         "thinkUrl": os.environ.get("VOICE_AGENT_THINK_URL", DEFAULT_THINK_URL),
+        "thinkProvider": "deepseek",
+        "thinkModel": os.environ.get("VOICE_AGENT_THINK_MODEL", DEFAULT_THINK_MODEL),
         "listenModel": os.environ.get("VOICE_AGENT_LISTEN_MODEL", "nova-2"),
         "speakModel": os.environ.get("VOICE_AGENT_SPEAK_MODEL", "aura-2-asteria-en"),
         "prompt": os.environ.get(
@@ -124,6 +145,8 @@ def public_config() -> dict[str, Any]:
         ),
         "sources": {
             "deepgram": "https://developers.deepgram.com/reference/voice-agent/voice-agent",
+            "deepgramThink": "https://developers.deepgram.com/docs/voice-agent-llm-models",
+            "deepseek": "https://api-docs.deepseek.com/api/create-chat-completion",
             "personaplex": "https://research.nvidia.com/labs/adlr/personaplex/",
         },
     }
@@ -166,10 +189,12 @@ async def api_health() -> JSONResponse:
 
     return JSONResponse(
         {
-            "ok": bool(deepgram_key()),
+            "ok": bool(deepgram_key()) and bool(deepseek_key()),
             "deepgramKeyConfigured": bool(deepgram_key()),
+            "deepseekKeyConfigured": bool(deepseek_key()),
             "endpoint": VOICE_AGENT_URL,
             "thinkUrl": public_config()["thinkUrl"],
+            "thinkModel": public_config()["thinkModel"],
         }
     )
 
@@ -230,7 +255,41 @@ async def _browser_to_deepgram(browser: WebSocket, upstream: Any) -> None:
         if frame.get("bytes") is not None:
             await upstream.send(frame["bytes"])
         elif frame.get("text") is not None:
-            await upstream.send(frame["text"])
+            await upstream.send(rewrite_settings_message(frame["text"]))
+
+
+def rewrite_settings_message(message: str) -> str:
+    """Inject server-held DeepSeek settings into the Voice Agent configuration."""
+
+    try:
+        payload = json.loads(message)
+    except json.JSONDecodeError:
+        return message
+    if payload.get("type") != "Settings":
+        return message
+
+    key = deepseek_key()
+    if not key:
+        LOGGER.warning("DeepSeek key missing; leaving browser think settings unchanged")
+        return message
+
+    agent = payload.setdefault("agent", {})
+    agent["think"] = {
+        "provider": {
+            "type": "open_ai",
+            "model": os.environ.get("VOICE_AGENT_THINK_MODEL", DEFAULT_THINK_MODEL),
+            "temperature": float(os.environ.get("VOICE_AGENT_THINK_TEMPERATURE", "0.35")),
+        },
+        "endpoint": {
+            "url": os.environ.get("VOICE_AGENT_THINK_URL", DEFAULT_THINK_URL),
+            "headers": {
+                "authorization": f"Bearer {key}",
+                "content-type": "application/json",
+            },
+        },
+        "prompt": public_config()["prompt"],
+    }
+    return json.dumps(payload, separators=(",", ":"))
 
 
 async def _deepgram_to_browser(upstream: Any, browser: WebSocket) -> None:
@@ -430,7 +489,7 @@ HTML = """<!doctype html>
     <header class="topbar">
       <div class="brand">
         <h1>Deepgram Voice Agent</h1>
-        <p>Local key-safe voice GUI for live Deepgram STT, agent routing, and neural TTS.</p>
+        <p>Local key-safe voice GUI for live Deepgram STT, DeepSeek thinking, and neural TTS.</p>
       </div>
       <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">offline</span></div>
     </header>
@@ -446,8 +505,9 @@ HTML = """<!doctype html>
               <button id="stopBtn" class="danger wide" type="button" disabled>Stop</button>
             </div>
             <div class="meta">
-              <span class="pill" id="keyState">key: checking</span>
+              <span class="pill" id="keyState">keys: checking</span>
               <span class="pill">Deepgram Voice Agent API</span>
+              <span class="pill" id="thinkState">Think: DeepSeek</span>
               <span class="pill">NVIDIA PersonaPlex tracked</span>
             </div>
           </div>
@@ -457,7 +517,11 @@ HTML = """<!doctype html>
       <section class="panel">
         <div class="field">
           <label for="thinkUrl">Think endpoint</label>
-          <input id="thinkUrl" autocomplete="off" />
+          <input id="thinkUrl" autocomplete="off" disabled />
+        </div>
+        <div class="field">
+          <label for="thinkModel">Think model</label>
+          <input id="thinkModel" autocomplete="off" disabled />
         </div>
         <div class="field">
           <label for="prompt">Voice prompt</label>
@@ -555,7 +619,7 @@ HTML = """<!doctype html>
             provider: { type: "deepgram", model: $("listenModel").value, endpointing: 800 },
           },
           think: {
-            provider: { type: "open_ai", model: "gpt-4o-mini" },
+            provider: { type: "open_ai", model: $("thinkModel").value },
             endpoint: { url: $("thinkUrl").value, headers: {} },
             prompt: $("prompt").value,
           },
@@ -717,6 +781,8 @@ HTML = """<!doctype html>
       .then((config) => {
         state.config = config;
         $("thinkUrl").value = config.thinkUrl;
+        $("thinkModel").value = config.thinkModel;
+        $("thinkState").textContent = `Think: ${config.thinkModel}`;
         $("listenModel").value = config.listenModel;
         $("speakModel").value = config.speakModel;
         $("prompt").value = config.prompt;
@@ -727,8 +793,9 @@ HTML = """<!doctype html>
     fetch("/api/health")
       .then((response) => response.json())
       .then((health) => {
-        $("keyState").textContent = health.deepgramKeyConfigured ? "key: configured" : "key: missing";
-        if (!health.deepgramKeyConfigured) setStatus("error", "missing key");
+        const ready = health.deepgramKeyConfigured && health.deepseekKeyConfigured;
+        $("keyState").textContent = ready ? "keys: configured" : "keys: missing";
+        if (!ready) setStatus("error", "missing key");
       })
       .catch(() => setStatus("error", "health error"));
   </script>

@@ -78,9 +78,10 @@ Open the GUI from the NoMachine desktop:
 http://127.0.0.1:18087/
 ```
 
-The page keeps the Deepgram key server-side, streams browser microphone PCM to
-Deepgram Voice Agent, and plays the returned neural voice audio. The **Mute**
-button stops sending microphone frames while the connection remains open.
+The page keeps Deepgram and DeepSeek keys server-side, streams browser
+microphone PCM to Deepgram Voice Agent, injects DeepSeek as the server-side
+think provider, and plays the returned neural voice audio. The **Mute** button
+stops sending microphone frames while the connection remains open.
 
 ### Basic Controls
 
