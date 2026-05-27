@@ -442,28 +442,105 @@ HTML = """<!doctype html>
       place-items: center;
       text-align: center;
     }
+    .stage > div {
+      width: min(100%, 704px);
+      display: grid;
+      justify-items: center;
+    }
     .orb {
       width: min(58vw, 260px);
       aspect-ratio: 1;
-      border-radius: 50%;
-      border: 1px solid rgba(255, 255, 255, 0.18);
+      position: relative;
       display: grid;
       place-items: center;
-      background:
-        radial-gradient(circle at 38% 32%, rgba(255,255,255,0.26), transparent 16%),
-        radial-gradient(circle at 50% 56%, rgba(99,168,255,0.68), rgba(31,35,40,0.94) 62%);
-      box-shadow: 0 0 0 0 rgba(99, 168, 255, 0.2);
-      transition: box-shadow 160ms ease, transform 160ms ease;
+      border-radius: 50%;
+      transition: transform 160ms ease;
+      isolation: isolate;
     }
-    .orb[data-state="listening"] { box-shadow: 0 0 0 12px rgba(98, 210, 127, 0.12); }
-    .orb[data-state="speaking"] { box-shadow: 0 0 0 18px rgba(227, 178, 76, 0.11); transform: scale(1.015); }
-    .orb[data-state="error"] { box-shadow: 0 0 0 12px rgba(255, 107, 107, 0.13); }
+    .orb::before {
+      content: "";
+      position: absolute;
+      inset: 37%;
+      border-radius: 999px;
+      background: rgba(99, 168, 255, 0.28);
+      filter: blur(18px);
+      opacity: 0.65;
+      z-index: -1;
+    }
+    .voice-loop {
+      position: absolute;
+      inset: 19%;
+      border: 1.5px solid rgba(165, 207, 255, 0.82);
+      border-radius: 50%;
+      box-shadow:
+        0 0 16px rgba(99, 168, 255, 0.34),
+        inset 0 0 14px rgba(99, 168, 255, 0.13);
+      transform-origin: center;
+      transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+    }
+    .voice-loop:first-child {
+      transform: rotate(34deg) scaleX(0.62);
+    }
+    .voice-loop:nth-child(2) {
+      transform: rotate(-34deg) scaleX(0.62);
+    }
+    .orb[data-state="ready"] .voice-loop {
+      border-color: rgba(126, 215, 201, 0.88);
+      box-shadow: 0 0 18px rgba(98, 210, 127, 0.24);
+    }
+    .orb[data-state="listening"] .voice-loop:first-child {
+      animation: loopListenA 1.28s ease-in-out infinite;
+      border-color: rgba(98, 210, 127, 0.96);
+      box-shadow: 0 0 22px rgba(98, 210, 127, 0.34);
+    }
+    .orb[data-state="listening"] .voice-loop:nth-child(2) {
+      animation: loopListenB 1.28s ease-in-out infinite;
+      border-color: rgba(126, 215, 201, 0.92);
+      box-shadow: 0 0 18px rgba(126, 215, 201, 0.28);
+    }
+    .orb[data-state="speaking"] .voice-loop:first-child,
+    .orb[data-state="speaking"] .voice-loop:nth-child(2) {
+      border-color: rgba(246, 209, 139, 0.95);
+      box-shadow: 0 0 24px rgba(227, 178, 76, 0.34);
+    }
+    .orb[data-state="speaking"] .voice-loop:first-child {
+      animation: loopSpeakA 1.8s linear infinite;
+    }
+    .orb[data-state="speaking"] .voice-loop:nth-child(2) {
+      animation: loopSpeakB 1.8s linear infinite;
+    }
+    .orb[data-state="error"] .voice-loop {
+      border-color: rgba(255, 107, 107, 0.84);
+      box-shadow: 0 0 20px rgba(255, 107, 107, 0.28);
+    }
     .orb-label {
+      position: relative;
       font-family: "JetBrains Mono", monospace;
       text-transform: uppercase;
       font-weight: 700;
-      color: white;
+      color: var(--text);
       text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+      padding: 7px 10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 999px;
+      background: rgba(16, 18, 20, 0.72);
+      min-width: 104px;
+    }
+    @keyframes loopListenA {
+      0%, 100% { transform: rotate(34deg) scaleX(0.62) scale(1); }
+      50% { transform: rotate(34deg) scaleX(0.62) scale(1.06); }
+    }
+    @keyframes loopListenB {
+      0%, 100% { transform: rotate(-34deg) scaleX(0.62) scale(1.04); }
+      50% { transform: rotate(-34deg) scaleX(0.62) scale(0.98); }
+    }
+    @keyframes loopSpeakA {
+      from { transform: rotate(34deg) scaleX(0.62); }
+      to { transform: rotate(394deg) scaleX(0.62); }
+    }
+    @keyframes loopSpeakB {
+      from { transform: rotate(-34deg) scaleX(0.62); }
+      to { transform: rotate(-394deg) scaleX(0.62); }
     }
     .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
     .controls .wide { grid-column: span 2; }
@@ -526,7 +603,11 @@ HTML = """<!doctype html>
       <section>
         <div class="panel stage">
           <div>
-            <div id="orb" class="orb" data-state="offline"><div id="orbText" class="orb-label">offline</div></div>
+            <div id="orb" class="orb" data-state="offline">
+              <span class="voice-loop" aria-hidden="true"></span>
+              <span class="voice-loop" aria-hidden="true"></span>
+              <div id="orbText" class="orb-label">offline</div>
+            </div>
             <div class="controls">
               <button id="connectBtn" class="primary" type="button">Start</button>
               <button id="muteBtn" class="warn" type="button" disabled>Mute</button>
