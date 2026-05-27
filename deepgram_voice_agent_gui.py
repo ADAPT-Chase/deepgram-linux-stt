@@ -18,7 +18,7 @@ from typing import Any
 import uvicorn
 import websockets
 from fastapi import FastAPI, WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 
 APP_NAME = "Deepgram Voice Agent GUI"
@@ -31,6 +31,7 @@ VOICE_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse"
 DEFAULT_THINK_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_THINK_MODEL = "deepseek-v4-flash"
 DEFAULT_PROXY_AUTH_KEY_ENVS = ("sage_20500_gateway_token",)
+ASSET_DIR = Path(__file__).resolve().parent / "assets"
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
 ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$")
@@ -200,6 +201,16 @@ async def favicon() -> Response:
         "</svg>"
     )
     return Response(svg, media_type="image/svg+xml")
+
+
+@app.get("/assets/{filename}")
+async def asset(filename: str) -> FileResponse:
+    """Serve bundled visual assets for the voice indicator."""
+
+    allowed = {"dg-voice-two-loops-colored.png", "talking-colors.png"}
+    if filename not in allowed:
+        return Response(status_code=404)
+    return FileResponse(ASSET_DIR / filename, media_type="image/png")
 
 
 @app.get("/api/health")
@@ -460,58 +471,59 @@ HTML = """<!doctype html>
     .orb::before {
       content: "";
       position: absolute;
-      inset: 37%;
+      inset: 31%;
       border-radius: 999px;
-      background: rgba(99, 168, 255, 0.28);
-      filter: blur(18px);
-      opacity: 0.65;
+      background:
+        radial-gradient(circle, rgba(0, 243, 255, 0.23), transparent 62%),
+        radial-gradient(circle, rgba(255, 31, 222, 0.16), transparent 68%);
+      filter: blur(22px);
+      opacity: 0.86;
       z-index: -1;
     }
-    .voice-loop {
+    .voice-art {
       position: absolute;
-      inset: 19%;
-      border: 1.5px solid rgba(165, 207, 255, 0.82);
-      border-radius: 50%;
-      box-shadow:
-        0 0 16px rgba(99, 168, 255, 0.34),
-        inset 0 0 14px rgba(99, 168, 255, 0.13);
+      inset: -2%;
+      width: 104%;
+      height: 104%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 12px rgba(0, 243, 255, 0.32));
+      opacity: 0;
       transform-origin: center;
-      transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+      transition: opacity 160ms ease, transform 160ms ease, filter 160ms ease;
     }
-    .voice-loop:first-child {
-      transform: rotate(34deg) scaleX(0.62);
+    .voice-art.idle {
+      opacity: 1;
+      transform: scale(1.02);
     }
-    .voice-loop:nth-child(2) {
-      transform: rotate(-34deg) scaleX(0.62);
+    .voice-art.active {
+      transform: scale(1.04);
     }
-    .orb[data-state="ready"] .voice-loop {
-      border-color: rgba(126, 215, 201, 0.88);
-      box-shadow: 0 0 18px rgba(98, 210, 127, 0.24);
+    .orb[data-state="ready"] .voice-art.idle {
+      filter: drop-shadow(0 0 14px rgba(0, 255, 149, 0.28));
     }
-    .orb[data-state="listening"] .voice-loop:first-child {
-      animation: loopListenA 1.28s ease-in-out infinite;
-      border-color: rgba(98, 210, 127, 0.96);
-      box-shadow: 0 0 22px rgba(98, 210, 127, 0.34);
+    .orb[data-state="listening"] .voice-art.idle,
+    .orb[data-state="speaking"] .voice-art.idle {
+      opacity: 0;
     }
-    .orb[data-state="listening"] .voice-loop:nth-child(2) {
-      animation: loopListenB 1.28s ease-in-out infinite;
-      border-color: rgba(126, 215, 201, 0.92);
-      box-shadow: 0 0 18px rgba(126, 215, 201, 0.28);
+    .orb[data-state="listening"] .voice-art.active,
+    .orb[data-state="speaking"] .voice-art.active {
+      opacity: 1;
     }
-    .orb[data-state="speaking"] .voice-loop:first-child,
-    .orb[data-state="speaking"] .voice-loop:nth-child(2) {
-      border-color: rgba(246, 209, 139, 0.95);
-      box-shadow: 0 0 24px rgba(227, 178, 76, 0.34);
+    .orb[data-state="listening"] .voice-art.active {
+      animation: markListen 1.18s ease-in-out infinite;
+      filter: drop-shadow(0 0 16px rgba(0, 255, 149, 0.38));
     }
-    .orb[data-state="speaking"] .voice-loop:first-child {
-      animation: loopSpeakA 1.8s linear infinite;
+    .orb[data-state="speaking"] .voice-art.active {
+      animation: markSpeak 1.55s linear infinite;
+      filter: drop-shadow(0 0 18px rgba(255, 31, 222, 0.38));
     }
-    .orb[data-state="speaking"] .voice-loop:nth-child(2) {
-      animation: loopSpeakB 1.8s linear infinite;
+    .orb[data-state="error"] .voice-art.idle {
+      opacity: 1;
+      filter: grayscale(0.4) hue-rotate(120deg) drop-shadow(0 0 15px rgba(255, 107, 107, 0.34));
     }
-    .orb[data-state="error"] .voice-loop {
-      border-color: rgba(255, 107, 107, 0.84);
-      box-shadow: 0 0 20px rgba(255, 107, 107, 0.28);
+    .orb[data-state="error"] .voice-art.active {
+      opacity: 0;
+      filter: drop-shadow(0 0 15px rgba(255, 107, 107, 0.34));
     }
     .orb-label {
       position: relative;
@@ -519,28 +531,20 @@ HTML = """<!doctype html>
       text-transform: uppercase;
       font-weight: 700;
       color: var(--text);
-      text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+      text-shadow: 0 1px 10px rgba(0,0,0,0.72);
       padding: 7px 10px;
-      border: 1px solid rgba(255,255,255,0.12);
+      border: 1px solid rgba(0, 243, 255, 0.16);
       border-radius: 999px;
-      background: rgba(16, 18, 20, 0.72);
+      background: rgba(8, 10, 13, 0.74);
       min-width: 104px;
     }
-    @keyframes loopListenA {
-      0%, 100% { transform: rotate(34deg) scaleX(0.62) scale(1); }
-      50% { transform: rotate(34deg) scaleX(0.62) scale(1.06); }
+    @keyframes markListen {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.035); }
     }
-    @keyframes loopListenB {
-      0%, 100% { transform: rotate(-34deg) scaleX(0.62) scale(1.04); }
-      50% { transform: rotate(-34deg) scaleX(0.62) scale(0.98); }
-    }
-    @keyframes loopSpeakA {
-      from { transform: rotate(34deg) scaleX(0.62); }
-      to { transform: rotate(394deg) scaleX(0.62); }
-    }
-    @keyframes loopSpeakB {
-      from { transform: rotate(-34deg) scaleX(0.62); }
-      to { transform: rotate(-394deg) scaleX(0.62); }
+    @keyframes markSpeak {
+      from { transform: rotate(0deg) scale(1.04); }
+      to { transform: rotate(360deg) scale(1.04); }
     }
     .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
     .controls .wide { grid-column: span 2; }
@@ -604,8 +608,8 @@ HTML = """<!doctype html>
         <div class="panel stage">
           <div>
             <div id="orb" class="orb" data-state="offline">
-              <span class="voice-loop" aria-hidden="true"></span>
-              <span class="voice-loop" aria-hidden="true"></span>
+              <img class="voice-art idle" src="/assets/dg-voice-two-loops-colored.png" alt="" aria-hidden="true" />
+              <img class="voice-art active" src="/assets/talking-colors.png" alt="" aria-hidden="true" />
               <div id="orbText" class="orb-label">offline</div>
             </div>
             <div class="controls">
