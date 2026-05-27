@@ -12,7 +12,9 @@ Environment=VOICE_AGENT_SECRET_FILE=/adapt/secrets/m2.env
 Environment=VOICE_AGENT_DEEPGRAM_KEY_ENVS=DEEPGRAM_API_KEY,DEEPGRAM_API_KEY_nc
 Environment=VOICE_AGENT_DEEPSEEK_KEY_ENVS=DEEPSEEK_API_KEY
 Environment=VOICE_AGENT_LISTEN_MODEL=nova-2
+Environment=VOICE_AGENT_THINK_URL=https://dg.adaptdev.ai/v1/chat/completions
 Environment=VOICE_AGENT_THINK_MODEL=deepseek-v4-flash
+Environment=VOICE_AGENT_PROXY_AUTH_KEY_ENVS=sage_20500_gateway_token
 ExecStart=/usr/bin/python3 /adapt/projects/stt/deepgram_voice_agent_gui.py
 Restart=always
 RestartSec=2

@@ -30,6 +30,7 @@ DEFAULT_DEEPSEEK_KEY_ENVS = ("DEEPSEEK_API_KEY",)
 VOICE_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse"
 DEFAULT_THINK_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_THINK_MODEL = "deepseek-v4-flash"
+DEFAULT_PROXY_AUTH_KEY_ENVS = ("sage_20500_gateway_token",)
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
 ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$")
@@ -124,6 +125,24 @@ def deepseek_key() -> str:
     return load_secret_from_file(secret_file, key_envs)
 
 
+def proxy_auth_token() -> str:
+    """Resolve the bearer token for the public TeamADAPT LLM proxy."""
+
+    key_envs = tuple(
+        item.strip()
+        for item in os.environ.get(
+            "VOICE_AGENT_PROXY_AUTH_KEY_ENVS", ",".join(DEFAULT_PROXY_AUTH_KEY_ENVS)
+        ).split(",")
+        if item.strip()
+    )
+    for name in key_envs:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    secret_file = Path(os.environ.get("VOICE_AGENT_SECRET_FILE", str(DEFAULT_SECRET_FILE)))
+    return load_secret_from_file(secret_file, key_envs)
+
+
 def public_config() -> dict[str, Any]:
     """Return non-secret GUI defaults."""
 
@@ -192,6 +211,7 @@ async def api_health() -> JSONResponse:
             "ok": bool(deepgram_key()) and bool(deepseek_key()),
             "deepgramKeyConfigured": bool(deepgram_key()),
             "deepseekKeyConfigured": bool(deepseek_key()),
+            "proxyAuthConfigured": bool(proxy_auth_token()),
             "endpoint": VOICE_AGENT_URL,
             "thinkUrl": public_config()["thinkUrl"],
             "thinkModel": public_config()["thinkModel"],
@@ -269,11 +289,22 @@ def rewrite_settings_message(message: str) -> str:
         return message
 
     key = deepseek_key()
-    if not key:
+    proxy_token = proxy_auth_token()
+    think_url = os.environ.get("VOICE_AGENT_THINK_URL", DEFAULT_THINK_URL)
+
+    agent = payload.setdefault("agent", {})
+    headers = {"content-type": "application/json"}
+    if "dg.adaptdev.ai" in think_url:
+        if proxy_token:
+            headers["authorization"] = f"Bearer {proxy_token}"
+        else:
+            LOGGER.warning("Proxy auth token missing for public dg.adaptdev.ai think URL")
+    elif key:
+        headers["authorization"] = f"Bearer {key}"
+    else:
         LOGGER.warning("DeepSeek key missing; leaving browser think settings unchanged")
         return message
 
-    agent = payload.setdefault("agent", {})
     agent["think"] = {
         "provider": {
             "type": "open_ai",
@@ -281,11 +312,8 @@ def rewrite_settings_message(message: str) -> str:
             "temperature": float(os.environ.get("VOICE_AGENT_THINK_TEMPERATURE", "0.35")),
         },
         "endpoint": {
-            "url": os.environ.get("VOICE_AGENT_THINK_URL", DEFAULT_THINK_URL),
-            "headers": {
-                "authorization": f"Bearer {key}",
-                "content-type": "application/json",
-            },
+            "url": think_url,
+            "headers": headers,
         },
         "prompt": public_config()["prompt"],
     }
