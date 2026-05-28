@@ -670,15 +670,14 @@ async def tool_hermes_remember(arguments: dict[str, Any]) -> dict[str, Any]:
         scope="hermes",
     )
     agent = _valid_agent_name(str(arguments.get("agent") or "mnemos"))
-    timeout = tool_timeout(arguments.get("timeout"), default=45, maximum=120)
     message = (
         "MEMORY WRITE REQUEST from Deepgram voice agent.\n"
         f"Local memory id: {memory['id']}\n"
         f"Tags: {', '.join(tags) if tags else '(none)'}\n"
-        "Persist this in durable Hermes/Mnemos fleet memory and reply with status.\n\n"
+        "Persist this in durable Hermes/Mnemos fleet memory. No synchronous reply is required.\n\n"
         f"{content}"
     )
-    result = await _nats_roundtrip(agent, "direct", message, timeout)
+    result = await _nats_publish(agent, "direct", message)
     return {"ok": True, "tool": "hermes_remember", "memory": memory, "nats": result}
 
 
@@ -944,6 +943,31 @@ def _nats_message(message: str, reply_to: str | None = None) -> dict[str, Any]:
     if reply_to:
         payload["reply_to"] = reply_to
     return payload
+
+
+async def _nats_publish(agent: str, channel: str, message: str) -> dict[str, Any]:
+    """Publish a NATS message without waiting for a reply."""
+
+    agent = _valid_agent_name(agent)
+    if channel not in {"direct", "meet"}:
+        raise ValueError("channel must be direct or meet")
+    url = nats_url()
+    if not url:
+        raise RuntimeError("NATS_URL is not configured")
+
+    nc = await nats.connect(url, name="deepgram-voice-agent-gui-publish")
+    subject = f"{NOVA_SUBJECT_NS}.{agent}.{channel}"
+    event = _nats_message(message)
+    await nc.publish(subject, json.dumps(event).encode())
+    await nc.flush()
+    await nc.drain()
+    return {
+        "agent": agent,
+        "channel": channel,
+        "subject": subject,
+        "published": True,
+        "eventId": event["id"],
+    }
 
 
 async def _nats_roundtrip(agent: str, channel: str, message: str, timeout: float) -> dict[str, Any]:
