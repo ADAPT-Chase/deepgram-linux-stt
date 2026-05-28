@@ -1,30 +1,34 @@
 # Decisions Log
 
-## 2026-05-28 05:13:25 — SIGNED_BY_AGENT
+## 2026-05-28 05:17:36 — sable
+Decision: Use `sable` as the operational signature for this voice/ops work.
+Rationale: The operator explicitly requested replacing placeholder signatures with Sable's identity.
+
+## 2026-05-28 05:13:25 — sable
 Decision: Translate spoken editing and punctuation commands in the server-side dictation typer.
 Rationale: Running command conversion after transcription but before `xdotool` insertion makes it deterministic and works across terminals, browser text boxes, and editors in the X11 session.
 
-## 2026-05-28 05:07:10 — SIGNED_BY_AGENT
+## 2026-05-28 05:07:10 — sable
 Decision: Bias browser dictation toward complete utterances and key domain terms.
 Rationale: Longer silence padding and shorter minimum speech windows address clipped endings and single-word misses, while Nova-3 `keyterm` prompting improves recognition for terms such as `autonomous`.
 
-## 2026-05-28 03:11:25 — SIGNED_BY_AGENT
+## 2026-05-28 03:11:25 — sable
 Decision: Remove clipboard paste from browser dictation.
 Rationale: Codex/browser targets treat clipboard paste as an image-capable operation and can emit missing-image clipboard errors; serialized direct typing avoids clipboard side effects.
 
-## 2026-05-28 02:33:44 — SIGNED_BY_AGENT
+## 2026-05-28 02:33:44 — sable
 Decision: Disable the legacy NoMachine remote STT daemon while `/dictation` is the active dictation path.
 Rationale: The daemon can be unmuted independently and then competes with browser dictation, causing duplicate or interleaved typed text.
 
-## 2026-05-28 02:33:44 — SIGNED_BY_AGENT
+## 2026-05-28 02:33:44 — sable
 Decision: Paste completed dictation segments through the clipboard before falling back to direct `xdotool type`.
 Rationale: Atomic paste is less prone to character interleaving and dropped keys than slow per-character typing.
 
-## 2026-05-28 02:21:29 — SIGNED_BY_AGENT
+## 2026-05-28 02:21:29 — sable
 Decision: Add browser-microphone dictation as a bypass for NoMachine client microphone forwarding.
 Rationale: NoMachine's virtual microphone path is silent after reboot, while browser microphone capture can still reach the server over HTTPS and type into the active desktop via `xdotool`.
 
-## 2026-05-28 01:43:57 — SIGNED_BY_AGENT
+## 2026-05-28 01:43:57 — sable
 Decision: Retune NoMachine remote STT for low-latency dictation and preserve mute state across restarts.
 Rationale: The voice services were running after reboot, Deepgram answered quickly, and the user-visible lag matched local 10-second batching rather than provider outage.
 
