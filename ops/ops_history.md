@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-05-28 06:42:23 — sable
+Investigated voice-agent no-audio playback. A direct WebSocket smoke test using the current Deepgram `InjectUserMessage` format returned assistant text plus 38 PCM audio frames / 36480 bytes, so the backend Voice Agent + TTS path is functional. Fixed the GUI typed-turn payload, added a Test Sound button, added audio frame/byte logging on `AgentAudioDone`, added Blob-to-ArrayBuffer fallback, increased playback gain, restarted `deepgram-voice-agent-gui.service`, and verified the public page serves the updated client.
+
 ## 2026-05-28 05:37:09 — sable
 Added optional LLM-backed cleanup for `/dictation`. Completed STT segments now pass through the configured bearer-auth OpenAI-compatible LLM endpoint when `VOICE_AGENT_DICTATION_POLISH=1`, with cleanup constrained to punctuation, capitalization, paragraph formatting, and obvious duplicate words. Spoken key commands skip the LLM path. Installed the updated user systemd unit, restarted `deepgram-voice-agent-gui.service`, verified live service environment, verified `/dictation` delivery, and smoke-tested the cleanup route through `https://dg.adaptdev.ai/v1/chat/completions`.
 

@@ -2319,6 +2319,7 @@ HTML = """<!doctype html>
             <div class="controls">
               <button id="connectBtn" class="primary" type="button">Start</button>
               <button id="muteBtn" class="warn" type="button" disabled>Mute</button>
+              <button id="testSoundBtn" type="button">Test Sound</button>
               <button id="stopBtn" class="danger wide" type="button" disabled>Stop</button>
             </div>
             <div class="meta">
@@ -2396,10 +2397,13 @@ HTML = """<!doctype html>
     const state = {
       ws: null,
       playCtx: null,
+      playGain: null,
       captureCtx: null,
       micStream: null,
       scriptNode: null,
       nextPlayTime: 0,
+      audioFrames: 0,
+      audioBytes: 0,
       muted: false,
       config: null,
       agents: [],
@@ -2413,6 +2417,7 @@ HTML = """<!doctype html>
     const connectBtn = $("connectBtn");
     const stopBtn = $("stopBtn");
     const muteBtn = $("muteBtn");
+    const testSoundBtn = $("testSoundBtn");
     const sendTextBtn = $("sendTextBtn");
     const sendDirectBtn = $("sendDirectBtn");
     const sendGroupBtn = $("sendGroupBtn");
@@ -2537,26 +2542,61 @@ HTML = """<!doctype html>
       gain.connect(state.captureCtx.destination);
     }
 
-    function scheduleAudio(arrayBuffer) {
-      if (!state.playCtx) return;
+    async function ensureAudioOutput() {
+      if (!state.playCtx) {
+        state.playCtx = new (window.AudioContext || window.webkitAudioContext)();
+        state.playGain = state.playCtx.createGain();
+        state.playGain.gain.value = 1.2;
+        state.playGain.connect(state.playCtx.destination);
+      }
+      if (state.playCtx.state !== "running") await state.playCtx.resume();
+    }
+
+    async function scheduleAudio(arrayBuffer) {
+      await ensureAudioOutput();
       const pcm = new Int16Array(arrayBuffer);
+      state.audioFrames += 1;
+      state.audioBytes += arrayBuffer.byteLength;
       const buffer = state.playCtx.createBuffer(1, pcm.length, 24000);
       const channel = buffer.getChannelData(0);
       for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
       const source = state.playCtx.createBufferSource();
       source.buffer = buffer;
-      source.connect(state.playCtx.destination);
+      source.connect(state.playGain);
       const startAt = Math.max(state.playCtx.currentTime, state.nextPlayTime);
       source.start(startAt);
       state.nextPlayTime = startAt + buffer.duration;
+    }
+
+    async function testSound() {
+      await ensureAudioOutput();
+      const oscillator = state.playCtx.createOscillator();
+      const gain = state.playCtx.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = 660;
+      gain.gain.setValueAtTime(0.0001, state.playCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.18, state.playCtx.currentTime + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, state.playCtx.currentTime + 0.35);
+      oscillator.connect(gain);
+      gain.connect(state.playGain);
+      oscillator.start();
+      oscillator.stop(state.playCtx.currentTime + 0.38);
+      logEvent("local", "played browser test tone");
     }
 
     function handleAgentEvent(message) {
       const type = message.type || "event";
       if (type.includes("UserStartedSpeaking")) setStatus("listening", "listening");
       else if (type.includes("UserStoppedSpeaking")) setStatus("busy", "thinking");
-      else if (type.includes("AgentStartedSpeaking")) setStatus("busy", "speaking");
-      else if (type.includes("AgentAudioDone")) setStatus("ready", "connected");
+      else if (type.includes("AgentStartedSpeaking")) {
+        state.audioFrames = 0;
+        state.audioBytes = 0;
+        setStatus("busy", "speaking");
+      }
+      else if (type.includes("AgentAudioDone")) {
+        setStatus("ready", "connected");
+        logEvent("audio", `${state.audioFrames} frames / ${state.audioBytes} bytes`);
+      }
       else if (type.includes("Error") || type === "VoiceUpstreamError") setStatus("error", "error");
 
       if (type === "ConversationText" || type.includes("ConversationText")) {
@@ -2571,8 +2611,7 @@ HTML = """<!doctype html>
       state.muted = false;
       muteBtn.textContent = "Mute";
       setStatus("busy", "connecting");
-      state.playCtx = new (window.AudioContext || window.webkitAudioContext)();
-      await state.playCtx.resume();
+      await ensureAudioOutput();
 
       const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
       state.ws = new WebSocket(`${wsProtocol}//${location.host}/ws/voice`);
@@ -2589,7 +2628,13 @@ HTML = """<!doctype html>
       };
       state.ws.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
-          scheduleAudio(event.data);
+          scheduleAudio(event.data).catch((err) => logEvent("audio error", err.message || String(err)));
+          return;
+        }
+        if (event.data instanceof Blob) {
+          event.data.arrayBuffer()
+            .then((buffer) => scheduleAudio(buffer))
+            .catch((err) => logEvent("audio error", err.message || String(err)));
           return;
         }
         try { handleAgentEvent(JSON.parse(event.data)); }
@@ -2610,10 +2655,13 @@ HTML = """<!doctype html>
       }
       state.ws = null;
       state.playCtx = null;
+      state.playGain = null;
       state.captureCtx = null;
       state.micStream = null;
       state.scriptNode = null;
       state.nextPlayTime = 0;
+      state.audioFrames = 0;
+      state.audioBytes = 0;
       state.muted = false;
       connectBtn.disabled = false;
       stopBtn.disabled = true;
@@ -2627,7 +2675,7 @@ HTML = """<!doctype html>
       const input = $("textTurn");
       const message = input.value.trim();
       if (!message || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-      state.ws.send(JSON.stringify({ type: "AgentV1InjectUserMessage", payload: { message } }));
+      state.ws.send(JSON.stringify({ type: "InjectUserMessage", content: message }));
       logEvent("typed", message);
       input.value = "";
     }
@@ -2702,6 +2750,9 @@ HTML = """<!doctype html>
       teardown("error");
     }));
     stopBtn.addEventListener("click", () => teardown("offline"));
+    testSoundBtn.addEventListener("click", () => testSound().catch((err) => {
+      logEvent("audio error", err.message || String(err));
+    }));
     muteBtn.addEventListener("click", () => {
       state.muted = !state.muted;
       muteBtn.textContent = state.muted ? "Unmute" : "Mute";

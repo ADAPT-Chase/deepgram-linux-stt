@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-05-28 06:42:23 — sable
+Decision: Add browser-side audio diagnostics before changing providers.
+Rationale: The server receives TTS PCM from Deepgram, so the next highest-leverage step is to distinguish silent browser/desktop output from missing agent audio with a local test tone and frame counters.
+
 ## 2026-05-28 05:37:09 — sable
 Decision: Use the existing LLM proxy as a post-STT formatting pass instead of embeddings.
 Rationale: Embeddings cannot directly repair punctuation or formatting; a low-temperature chat-completions rewrite can, and the dictation path can fall back to raw STT output if the provider is slow or unavailable.

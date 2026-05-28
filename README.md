@@ -83,6 +83,12 @@ microphone PCM to Deepgram Voice Agent, injects DeepSeek as the server-side
 think provider, and plays the returned neural voice audio. The **Mute** button
 stops sending microphone frames while the connection remains open.
 
+If the agent shows assistant text but no audible voice, press **Test Sound** in
+the GUI. If the test tone is silent, the issue is browser/desktop audio output.
+If the test tone works, watch the event log after an agent reply for `audio:
+<frames> frames / <bytes> bytes`; a non-zero count means Deepgram returned TTS
+audio and the browser received it.
+
 Browser-microphone dictation is available at:
 
 ```text
