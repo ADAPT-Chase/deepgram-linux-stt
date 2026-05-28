@@ -15,6 +15,8 @@ import logging
 import os
 import re
 import subprocess
+import threading
+import tkinter as tk
 import uuid
 import wave
 from datetime import datetime, timezone
@@ -52,6 +54,7 @@ DICTATION_THRESHOLD = 280
 DICTATION_SILENCE_MS = 650
 DICTATION_MIN_SPEECH_MS = 300
 DICTATION_MAX_SEGMENT_MS = 4_000
+TYPE_LOCK = threading.Lock()
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
 ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$")
@@ -1460,13 +1463,104 @@ def type_dictation_text(text: str) -> None:
         "DISPLAY": os.environ.get("DISPLAY", ":0"),
         "XAUTHORITY": os.environ.get("XAUTHORITY", "/home/x/.Xauthority"),
     }
-    subprocess.run(
-        ["xdotool", "type", "--clearmodifiers", "--delay", "10", f"{text} "],
-        check=False,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    with TYPE_LOCK:
+        if paste_dictation_text(f"{text} ", env):
+            return
+        subprocess.run(
+            ["xdotool", "type", "--clearmodifiers", "--delay", "0", f"{text} "],
+            check=False,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
+def paste_dictation_text(text: str, env: dict[str, str]) -> bool:
+    """Paste text through the X11 clipboard, falling back to direct typing on failure."""
+
+    root = None
+    previous = ""
+    had_previous = False
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            previous = root.clipboard_get()
+            had_previous = True
+        except Exception:
+            previous = ""
+            had_previous = False
+
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+        paste_key = "ctrl+shift+v" if active_window_is_terminal(env) else "ctrl+v"
+        completed = subprocess.run(
+            ["xdotool", "key", "--clearmodifiers", paste_key],
+            check=False,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time_to_restore_ms = 150
+        threading.Timer(
+            time_to_restore_ms / 1000,
+            restore_clipboard,
+            args=(previous, had_previous),
+        ).start()
+        return completed.returncode == 0
+    except Exception as exc:
+        LOGGER.debug("Clipboard paste failed; falling back to xdotool type: %s", exc)
+        return False
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+
+def active_window_is_terminal(env: dict[str, str]) -> bool:
+    """Return true when the active window is likely a terminal requiring Ctrl+Shift+V."""
+
+    try:
+        window_id = subprocess.check_output(
+            ["xdotool", "getactivewindow"],
+            env=env,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        class_name = subprocess.check_output(
+            ["xdotool", "getwindowclassname", window_id],
+            env=env,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip().lower()
+    except Exception:
+        return False
+    terminal_markers = ("terminal", "gnome-terminal", "konsole", "xterm", "kitty", "alacritty")
+    return any(marker in class_name for marker in terminal_markers)
+
+
+def restore_clipboard(previous: str, had_previous: bool) -> None:
+    """Restore the previous X11 clipboard content after a paste attempt."""
+
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.clipboard_clear()
+        if had_previous:
+            root.clipboard_append(previous)
+        root.update()
+    except Exception:
+        LOGGER.debug("Clipboard restore failed", exc_info=True)
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
 
 async def _browser_to_deepgram(browser: WebSocket, upstream: Any) -> None:

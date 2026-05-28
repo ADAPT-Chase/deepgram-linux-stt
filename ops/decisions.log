@@ -1,5 +1,13 @@
 # Decisions Log
 
+## 2026-05-28 02:33:44 — SIGNED_BY_AGENT
+Decision: Disable the legacy NoMachine remote STT daemon while `/dictation` is the active dictation path.
+Rationale: The daemon can be unmuted independently and then competes with browser dictation, causing duplicate or interleaved typed text.
+
+## 2026-05-28 02:33:44 — SIGNED_BY_AGENT
+Decision: Paste completed dictation segments through the clipboard before falling back to direct `xdotool type`.
+Rationale: Atomic paste is less prone to character interleaving and dropped keys than slow per-character typing.
+
 ## 2026-05-28 02:21:29 — SIGNED_BY_AGENT
 Decision: Add browser-microphone dictation as a bypass for NoMachine client microphone forwarding.
 Rationale: NoMachine's virtual microphone path is silent after reboot, while browser microphone capture can still reach the server over HTTPS and type into the active desktop via `xdotool`.

@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-05-28 02:33:44 — SIGNED_BY_AGENT
+Fixed garbled dictation caused by two active transcription typers. Disabled and stopped the legacy `nomachine-remote-stt.service`, changed browser dictation to serialize text insertion, and switched the preferred insertion method from slow per-character `xdotool type` to clipboard paste with terminal-aware paste keys. Restarted `deepgram-voice-agent-gui.service` and verified the dictation WebSocket still transcribes a synthetic phrase with typing disabled.
+
 ## 2026-05-28 02:21:29 — SIGNED_BY_AGENT
 Investigated continued remote transcription failure. Found NoMachine virtual microphone sources were silent after reboot even though the session accepted a voice server connection. Added browser-microphone dictation at `/dictation` with `/ws/dictate`; the browser sends 16 kHz PCM, the server transcribes through Deepgram `nova-3`, and recognized text is typed into the active X11 window through `xdotool`. Restarted `deepgram-voice-agent-gui.service` and verified a synthetic WebSocket dictation phrase with typing disabled.
 
