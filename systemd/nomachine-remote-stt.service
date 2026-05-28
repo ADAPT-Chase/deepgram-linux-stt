@@ -32,6 +32,7 @@ Environment=REMOTE_STT_READBACK=1
 Environment=REMOTE_STT_READBACK_MAX_CHARS=1200
 Environment=REMOTE_STT_TTS_CMD=/data/vast/home/x/.hermes/hermes-agent/venv/bin/edge-tts
 Environment=REMOTE_STT_TTS_VOICE=en-US-AvaMultilingualNeural
+Environment=REMOTE_STT_DEBUG=1
 ExecStart=/adapt/projects/stt/run_nomachine_remote_stt.sh
 Restart=always
 RestartSec=2

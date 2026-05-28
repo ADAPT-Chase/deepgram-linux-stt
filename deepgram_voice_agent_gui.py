@@ -8,16 +8,21 @@ server holds the Deepgram API key and relays frames to the Voice Agent API.
 from __future__ import annotations
 
 import asyncio
+import audioop
+import io
 import json
 import logging
 import os
 import re
+import subprocess
 import uuid
+import wave
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import nats
+import requests
 import uvicorn
 import websockets
 from fastapi import Request, FastAPI, WebSocket
@@ -40,6 +45,13 @@ DEFAULT_VOICE_HOME = Path("/adapt/novas/active/voice")
 ROSTER_PATH = Path("/adapt/platform/novaops/controlplane/pipecat-voice/roster.json")
 NOVA_SUBJECT_NS = "nova"
 NATS_SENDER = "voice-agent-gui"
+DICTATION_SAMPLE_RATE = 16_000
+DICTATION_CHANNELS = 1
+DICTATION_SAMPLE_WIDTH_BYTES = 2
+DICTATION_THRESHOLD = 280
+DICTATION_SILENCE_MS = 650
+DICTATION_MIN_SPEECH_MS = 300
+DICTATION_MAX_SEGMENT_MS = 4_000
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
 ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$")
@@ -1096,6 +1108,13 @@ async def index() -> str:
     return HTML
 
 
+@app.get("/dictation", response_class=HTMLResponse)
+async def dictation_index() -> str:
+    """Serve browser-microphone dictation into the active X11 window."""
+
+    return DICTATION_HTML
+
+
 @app.get("/api/config")
 async def api_config() -> JSONResponse:
     """Return GUI configuration without secrets."""
@@ -1290,6 +1309,166 @@ async def ws_voice_proxy(browser: WebSocket) -> None:
             pass
 
 
+@app.websocket("/ws/dictate")
+async def ws_dictation(browser: WebSocket) -> None:
+    """Transcribe browser PCM and type recognized text into the active X11 window."""
+
+    await browser.accept()
+    if not deepgram_key():
+        await browser.send_json({"type": "error", "message": "Deepgram key is not configured"})
+        await browser.close(code=1011, reason="missing deepgram key")
+        return
+
+    typing_enabled = True
+    speech = bytearray()
+    pre_roll: list[bytes] = []
+    pre_roll_ms = 0.0
+    silence_ms = 0.0
+    speech_ms = 0.0
+    total_ms = 0.0
+    peak_rms = 0
+
+    async def flush_segment() -> None:
+        nonlocal speech, pre_roll, pre_roll_ms, silence_ms, speech_ms, total_ms, peak_rms
+        pcm = bytes(speech)
+        audio_ms = len(pcm) / (
+            DICTATION_SAMPLE_RATE * DICTATION_CHANNELS * DICTATION_SAMPLE_WIDTH_BYTES
+        ) * 1000
+        segment_peak_rms = peak_rms
+        speech = bytearray()
+        pre_roll = []
+        pre_roll_ms = 0.0
+        silence_ms = 0.0
+        speech_ms = 0.0
+        total_ms = 0.0
+        peak_rms = 0
+        if not pcm:
+            return
+        transcript = await asyncio.to_thread(transcribe_dictation_pcm, pcm)
+        await browser.send_json(
+            {
+                "type": "segment",
+                "audioMs": round(audio_ms),
+                "peakRms": segment_peak_rms,
+                "text": transcript,
+            }
+        )
+        if transcript and typing_enabled:
+            await asyncio.to_thread(type_dictation_text, transcript)
+
+    try:
+        while True:
+            frame = await browser.receive()
+            if frame["type"] == "websocket.disconnect":
+                return
+            if frame.get("text") is not None:
+                try:
+                    payload = json.loads(frame["text"])
+                except json.JSONDecodeError:
+                    continue
+                if payload.get("type") == "typing":
+                    typing_enabled = bool(payload.get("enabled", True))
+                    await browser.send_json({"type": "typing", "enabled": typing_enabled})
+                continue
+
+            chunk = frame.get("bytes")
+            if not chunk:
+                continue
+            chunk_ms = len(chunk) / (
+                DICTATION_SAMPLE_RATE * DICTATION_CHANNELS * DICTATION_SAMPLE_WIDTH_BYTES
+            ) * 1000
+            rms = audioop.rms(chunk, DICTATION_SAMPLE_WIDTH_BYTES)
+            peak_rms = max(peak_rms, rms)
+            has_voice = rms >= DICTATION_THRESHOLD
+
+            if not speech:
+                pre_roll.append(chunk)
+                pre_roll_ms += chunk_ms
+                while pre_roll_ms > 350 and pre_roll:
+                    dropped = pre_roll.pop(0)
+                    pre_roll_ms -= len(dropped) / (
+                        DICTATION_SAMPLE_RATE
+                        * DICTATION_CHANNELS
+                        * DICTATION_SAMPLE_WIDTH_BYTES
+                    ) * 1000
+                if not has_voice:
+                    continue
+                speech.extend(b"".join(pre_roll))
+                total_ms += pre_roll_ms
+                pre_roll = []
+                pre_roll_ms = 0.0
+
+            speech.extend(chunk)
+            total_ms += chunk_ms
+            if has_voice:
+                silence_ms = 0.0
+                speech_ms += chunk_ms
+            else:
+                silence_ms += chunk_ms
+
+            should_flush = (
+                silence_ms >= DICTATION_SILENCE_MS and speech_ms >= DICTATION_MIN_SPEECH_MS
+            ) or total_ms >= DICTATION_MAX_SEGMENT_MS
+            if should_flush:
+                await flush_segment()
+    except Exception as exc:
+        LOGGER.info("Dictation websocket closed: %s", exc)
+
+
+def transcribe_dictation_pcm(pcm: bytes) -> str:
+    """Transcribe signed 16-bit mono PCM with Deepgram prerecorded STT."""
+
+    key = deepgram_key()
+    if not key or not pcm:
+        return ""
+    response = requests.post(
+        "https://api.deepgram.com/v1/listen",
+        params={
+            "model": "nova-3",
+            "language": "en-US",
+            "smart_format": "true",
+            "punctuate": "true",
+            "dictation": "true",
+        },
+        headers={"Authorization": f"Token {key}", "Content-Type": "audio/wav"},
+        data=pcm_to_wav_bytes(pcm),
+        timeout=(3.05, 8),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    alternatives = payload["results"]["channels"][0]["alternatives"]
+    return str(alternatives[0].get("transcript", "")).strip()
+
+
+def pcm_to_wav_bytes(pcm: bytes) -> bytes:
+    """Wrap raw signed 16-bit mono PCM in a WAV container."""
+
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav_file:
+        wav_file.setnchannels(DICTATION_CHANNELS)
+        wav_file.setsampwidth(DICTATION_SAMPLE_WIDTH_BYTES)
+        wav_file.setframerate(DICTATION_SAMPLE_RATE)
+        wav_file.writeframes(pcm)
+    return output.getvalue()
+
+
+def type_dictation_text(text: str) -> None:
+    """Type recognized text into the active X11 window."""
+
+    env = {
+        **os.environ,
+        "DISPLAY": os.environ.get("DISPLAY", ":0"),
+        "XAUTHORITY": os.environ.get("XAUTHORITY", "/home/x/.Xauthority"),
+    }
+    subprocess.run(
+        ["xdotool", "type", "--clearmodifiers", "--delay", "10", f"{text} "],
+        check=False,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 async def _browser_to_deepgram(browser: WebSocket, upstream: Any) -> None:
     """Forward browser text and binary frames to Deepgram."""
 
@@ -1412,6 +1591,148 @@ def main() -> None:
     host = os.environ.get("VOICE_AGENT_HOST", DEFAULT_HOST)
     port = int(os.environ.get("VOICE_AGENT_PORT", str(DEFAULT_PORT)))
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+DICTATION_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Adapt Dictation</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0d1117; color: #f0f6fc; }
+    main { width: min(720px, calc(100vw - 32px)); display: grid; gap: 16px; }
+    h1 { margin: 0; font-size: 28px; font-weight: 700; }
+    p { margin: 0; color: #8b949e; line-height: 1.45; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    button { border: 1px solid #30363d; background: #161b22; color: #f0f6fc; border-radius: 8px; padding: 10px 14px; font: inherit; cursor: pointer; }
+    button.primary { background: #238636; border-color: #2ea043; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .status { border: 1px solid #30363d; border-radius: 8px; padding: 12px; background: #010409; min-height: 24px; }
+    .log { height: 280px; overflow: auto; border: 1px solid #30363d; border-radius: 8px; background: #010409; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    .row { padding: 6px 0; border-bottom: 1px solid #161b22; }
+    .empty { color: #6e7681; }
+  </style>
+</head>
+<body>
+  <main>
+    <div>
+      <h1>Adapt Dictation</h1>
+      <p>Browser microphone to Deepgram, then typed into the active desktop text field.</p>
+    </div>
+    <div class="controls">
+      <button id="start" class="primary">Start</button>
+      <button id="stop" disabled>Stop</button>
+      <button id="typing" disabled>Typing On</button>
+    </div>
+    <div id="status" class="status">offline</div>
+    <div id="log" class="log"></div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = { ws: null, stream: null, ctx: null, node: null, typing: true };
+
+    function log(text, cls = "") {
+      const row = document.createElement("div");
+      row.className = `row ${cls}`;
+      row.textContent = text;
+      $("log").prepend(row);
+    }
+
+    function setStatus(text) { $("status").textContent = text; }
+
+    function downsample(float32, fromRate, toRate) {
+      if (fromRate === toRate) return float32;
+      const ratio = fromRate / toRate;
+      const out = new Float32Array(Math.floor(float32.length / ratio));
+      for (let i = 0; i < out.length; i++) out[i] = float32[Math.floor(i * ratio)];
+      return out;
+    }
+
+    function float32ToInt16(float32) {
+      const int16 = new Int16Array(float32.length);
+      for (let i = 0; i < float32.length; i++) {
+        const sample = Math.max(-1, Math.min(1, float32[i]));
+        int16[i] = sample < 0 ? sample * 32768 : sample * 32767;
+      }
+      return int16;
+    }
+
+    async function start() {
+      $("start").disabled = true;
+      setStatus("requesting microphone");
+      state.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      state.ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      await state.ctx.resume();
+      const source = state.ctx.createMediaStreamSource(state.stream);
+      const gain = state.ctx.createGain();
+      gain.gain.value = 0;
+      state.node = state.ctx.createScriptProcessor(4096, 1, 1);
+      const actualRate = state.ctx.sampleRate;
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      state.ws = new WebSocket(`${proto}//${location.host}/ws/dictate`);
+      state.ws.binaryType = "arraybuffer";
+      state.ws.onopen = () => {
+        setStatus("listening");
+        $("stop").disabled = false;
+        $("typing").disabled = false;
+        state.ws.send(JSON.stringify({ type: "typing", enabled: state.typing }));
+      };
+      state.ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "segment") {
+          const text = msg.text || "";
+          log(text || `blank segment peak=${msg.peakRms} audio=${msg.audioMs}ms`, text ? "" : "empty");
+        } else if (msg.type === "error") {
+          log(msg.message || "error");
+        }
+      };
+      state.ws.onclose = () => stop("offline");
+      state.node.onaudioprocess = (event) => {
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        const samples = downsample(event.inputBuffer.getChannelData(0), actualRate, 16000);
+        state.ws.send(float32ToInt16(samples).buffer);
+      };
+      source.connect(state.node);
+      state.node.connect(gain);
+      gain.connect(state.ctx.destination);
+    }
+
+    function stop(label = "stopped") {
+      if (state.node) state.node.disconnect();
+      if (state.ctx) state.ctx.close().catch(() => {});
+      if (state.stream) state.stream.getTracks().forEach((track) => track.stop());
+      if (state.ws) {
+        state.ws.onclose = null;
+        try { state.ws.close(); } catch {}
+      }
+      state.ws = null;
+      state.stream = null;
+      state.ctx = null;
+      state.node = null;
+      $("start").disabled = false;
+      $("stop").disabled = true;
+      $("typing").disabled = true;
+      setStatus(label);
+    }
+
+    $("start").addEventListener("click", () => start().catch((err) => {
+      log(err.message || String(err));
+      stop("error");
+    }));
+    $("stop").addEventListener("click", () => stop());
+    $("typing").addEventListener("click", () => {
+      state.typing = !state.typing;
+      $("typing").textContent = state.typing ? "Typing On" : "Typing Muted";
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: "typing", enabled: state.typing }));
+      }
+    });
+  </script>
+</body>
+</html>
+"""
 
 
 HTML = """<!doctype html>

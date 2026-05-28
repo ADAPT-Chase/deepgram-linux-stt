@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-05-28 02:21:29 — SIGNED_BY_AGENT
+Decision: Add browser-microphone dictation as a bypass for NoMachine client microphone forwarding.
+Rationale: NoMachine's virtual microphone path is silent after reboot, while browser microphone capture can still reach the server over HTTPS and type into the active desktop via `xdotool`.
+
 ## 2026-05-28 01:43:57 — SIGNED_BY_AGENT
 Decision: Retune NoMachine remote STT for low-latency dictation and preserve mute state across restarts.
 Rationale: The voice services were running after reboot, Deepgram answered quickly, and the user-visible lag matched local 10-second batching rather than provider outage.

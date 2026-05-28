@@ -64,6 +64,7 @@ class SttConfig:
     readback_max_chars: int
     tts_command: str
     tts_voice: str
+    debug: bool
 
 
 def load_config() -> SttConfig:
@@ -107,6 +108,7 @@ def load_config() -> SttConfig:
             "/data/vast/home/x/.hermes/hermes-agent/venv/bin/edge-tts",
         ),
         tts_voice=os.getenv("REMOTE_STT_TTS_VOICE", "en-US-AvaMultilingualNeural"),
+        debug=os.getenv("REMOTE_STT_DEBUG", "0") == "1",
     )
 
 
@@ -636,7 +638,7 @@ def main() -> int:
         "Remote STT segmentation "
         f"threshold={config.threshold} silence_ms={config.silence_ms} "
         f"min_speech_ms={config.min_speech_ms} max_segment_ms={config.max_segment_ms} "
-        f"deepgram_timeout_s={config.deepgram_timeout_s:g}",
+            f"deepgram_timeout_s={config.deepgram_timeout_s:g}",
         flush=True,
     )
 
@@ -662,6 +664,7 @@ def main() -> int:
     pre_roll: deque[bytes] = deque(maxlen=max(1, 300 // CHUNK_MS))
     silence_chunks = 0
     speech_chunks = 0
+    peak_rms = 0
 
     try:
         if capture.stdout is None:
@@ -680,9 +683,11 @@ def main() -> int:
                 pre_roll.clear()
                 silence_chunks = 0
                 speech_chunks = 0
+                peak_rms = 0
                 continue
 
             rms = audioop.rms(chunk, SAMPLE_WIDTH_BYTES)
+            peak_rms = max(peak_rms, rms)
             has_voice = rms >= config.threshold
 
             if not speech:
@@ -708,11 +713,21 @@ def main() -> int:
 
             if should_flush:
                 pcm = bytes(speech)
+                audio_ms = len(pcm) / (SAMPLE_RATE * CHANNELS * SAMPLE_WIDTH_BYTES) * 1000
+                segment_peak_rms = peak_rms
                 speech.clear()
                 speech_chunks = 0
                 silence_chunks = 0
+                peak_rms = 0
 
                 transcript = transcribe_audio(model, pcm, config)
+                if config.debug:
+                    print(
+                        "Remote STT segment "
+                        f"audio_ms={audio_ms:.0f} peak_rms={segment_peak_rms} "
+                        f"transcript_len={len(transcript)}",
+                        flush=True,
+                    )
                 append_transcript(config.log_path, transcript)
                 if hotkey_controller.enabled():
                     type_transcript(transcript)

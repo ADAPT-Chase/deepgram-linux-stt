@@ -83,6 +83,16 @@ microphone PCM to Deepgram Voice Agent, injects DeepSeek as the server-side
 think provider, and plays the returned neural voice audio. The **Mute** button
 stops sending microphone frames while the connection remains open.
 
+Browser-microphone dictation is available at:
+
+```text
+https://dg.adaptdev.ai/dictation
+```
+
+This path bypasses NoMachine microphone forwarding. The browser sends 16 kHz
+PCM to the server, the server transcribes through Deepgram `nova-3`, and
+recognized text is typed into the active X11 text box with `xdotool`.
+
 ### Basic Controls
 
 - **Hold ALT**: Starts listening (indicator turns green)
