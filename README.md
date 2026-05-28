@@ -96,6 +96,8 @@ recognized text is typed into the active X11 text box with `xdotool`.
 Spoken dictation commands:
 - `enter`, `return`, `new line`, `new paragraph`
 - `tab`
+- `mute`, `mute on`, `typing off`
+- `unmute`, `mute off`, `typing on`
 - `question mark`, `exclamation point`, `period`, `comma`, `colon`, `semicolon`, `dash`
 
 ### Basic Controls

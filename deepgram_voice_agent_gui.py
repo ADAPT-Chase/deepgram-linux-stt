@@ -70,6 +70,11 @@ DEFAULT_DICTATION_KEYTERMS = (
     "enter",
     "return",
     "new line",
+    "mute on",
+    "mute off",
+    "unmute",
+    "typing on",
+    "typing off",
     "question mark",
     "exclamation point",
 )
@@ -87,6 +92,14 @@ DICTATION_COMMAND_REPLACEMENTS = (
     (r"\bcolon\b", ":"),
     (r"\bsemicolon\b", ";"),
     (r"\b(?:dash|hyphen)\b", "-"),
+)
+DICTATION_MUTE_ON_RE = re.compile(
+    r"^\s*(?:mute|mute on|typing off|dictation off|stop typing)\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+DICTATION_MUTE_OFF_RE = re.compile(
+    r"^\s*(?:unmute|mute off|typing on|dictation on|start typing)\s*[.!?]?\s*$",
+    re.IGNORECASE,
 )
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
@@ -1366,6 +1379,7 @@ async def ws_dictation(browser: WebSocket) -> None:
 
     async def flush_segment() -> None:
         nonlocal speech, pre_roll, pre_roll_ms, silence_ms, speech_ms, total_ms, peak_rms
+        nonlocal typing_enabled
         pcm = bytes(speech)
         audio_ms = len(pcm) / (
             DICTATION_SAMPLE_RATE * DICTATION_CHANNELS * DICTATION_SAMPLE_WIDTH_BYTES
@@ -1381,6 +1395,20 @@ async def ws_dictation(browser: WebSocket) -> None:
         if not pcm:
             return
         transcript = await asyncio.to_thread(transcribe_dictation_pcm, pcm)
+        mute_command = dictation_mute_command(transcript)
+        if mute_command is not None:
+            typing_enabled = mute_command
+            await browser.send_json({"type": "typing", "enabled": typing_enabled})
+            await browser.send_json(
+                {
+                    "type": "segment",
+                    "audioMs": round(audio_ms),
+                    "peakRms": segment_peak_rms,
+                    "text": transcript,
+                    "command": "typing_on" if typing_enabled else "typing_off",
+                }
+            )
+            return
         await browser.send_json(
             {
                 "type": "segment",
@@ -1545,6 +1573,16 @@ def dictation_actions(text: str) -> list[tuple[str, str]]:
     add_text_action(actions, rendered[cursor:])
     add_trailing_space(actions)
     return actions
+
+
+def dictation_mute_command(text: str) -> bool | None:
+    """Return the new typing state for spoken mute commands, or None."""
+
+    if DICTATION_MUTE_ON_RE.match(text):
+        return False
+    if DICTATION_MUTE_OFF_RE.match(text):
+        return True
+    return None
 
 
 def normalize_spoken_punctuation(text: str) -> str:
@@ -1794,7 +1832,15 @@ DICTATION_HTML = """<!doctype html>
         const msg = JSON.parse(event.data);
         if (msg.type === "segment") {
           const text = msg.text || "";
-          log(text || `blank segment peak=${msg.peakRms} audio=${msg.audioMs}ms`, text ? "" : "empty");
+          if (msg.command) {
+            log(`${msg.command}: ${text}`);
+          } else {
+            log(text || `blank segment peak=${msg.peakRms} audio=${msg.audioMs}ms`, text ? "" : "empty");
+          }
+        } else if (msg.type === "typing") {
+          state.typing = Boolean(msg.enabled);
+          $("typing").textContent = state.typing ? "Typing On" : "Typing Muted";
+          log(state.typing ? "typing on" : "typing muted");
         } else if (msg.type === "error") {
           log(msg.message || "error");
         }

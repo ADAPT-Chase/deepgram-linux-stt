@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-05-28 05:24:50 — sable
+Added spoken mute/unmute controls to `/dictation`. The browser-microphone path now treats `mute`, `mute on`, `typing off`, `dictation off`, and `stop typing` as commands to keep listening while suppressing text insertion, and treats `unmute`, `mute off`, `typing on`, `dictation on`, and `start typing` as commands to resume insertion. Updated README command notes and verified parser behavior, page delivery, and service state.
+
 ## 2026-05-28 05:17:36 — sable
 Replaced legacy placeholder signature tokens with `sable` in the Deepgram STT project ops files per operator request.
 

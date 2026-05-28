@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-05-28 05:24:50 — sable
+Decision: Implement voice mute as a typing-state toggle, not a microphone disconnect.
+Rationale: The operator needs to speak freely without text going into the wrong box, while preserving low-friction recovery and avoiding microphone permission churn.
+
 ## 2026-05-28 05:17:36 — sable
 Decision: Use `sable` as the operational signature for this voice/ops work.
 Rationale: The operator explicitly requested replacing placeholder signatures with Sable's identity.
