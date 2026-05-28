@@ -43,6 +43,134 @@ NATS_SENDER = "voice-agent-gui"
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
 ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$")
+SECRET_LINE_RE = re.compile(
+    r"(?im)^([^=\n]*(?:api[_-]?key|token|secret|password|passwd|auth)[^=\n]*)=([^\n]*)$"
+)
+AUTH_VALUE_RE = re.compile(
+    r"(?i)\b(bearer|token|basic)\s+[A-Za-z0-9._~+/=-]{12,}"
+)
+MAX_TOOL_OUTPUT_CHARS = 12000
+MAX_TOOL_FILE_BYTES = 262144
+MAX_TOOL_WRITE_BYTES = 1048576
+VOICE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
+    {
+        "name": "adapt_tool_policy",
+        "description": (
+            "Inspect the active Adapt voice tool policy, runtime home, sandbox state, "
+            "sudo allowance, and available tool names."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "adapt_shell",
+        "description": (
+            "Run a shell command on the Adapt host. Use for system inspection, service "
+            "control, git, NATS CLI work, build/test commands, and local automation. "
+            "Default working directory is the voice agent home."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Shell command to run."},
+                "cwd": {
+                    "type": "string",
+                    "description": (
+                        "Optional working directory. Relative paths resolve from voice home."
+                    ),
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds. Defaults to 60, capped at 300.",
+                },
+                "sudo": {
+                    "type": "boolean",
+                    "description": "Run through sudo -n when true and sudo is enabled.",
+                },
+            },
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "adapt_read_file",
+        "description": (
+            "Read a local text file. Relative paths resolve from the voice agent home. "
+            "Sensitive-looking values are redacted from the returned content."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to read."},
+                "max_bytes": {
+                    "type": "number",
+                    "description": "Maximum bytes to read. Defaults to 65536, capped at 262144.",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "adapt_write_file",
+        "description": (
+            "Write or append a local text file. Relative paths resolve from the voice "
+            "agent home. Do not use for secrets; shared secrets belong in /adapt/secrets."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to write."},
+                "content": {"type": "string", "description": "Text content to write."},
+                "append": {"type": "boolean", "description": "Append when true."},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "adapt_nats_ping",
+        "description": "Ping one or more Adapt nova agents over NATS and return online status.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agents": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Nova agent names to ping, such as vox, iris, or vaeris.",
+                },
+                "timeout": {"type": "number", "description": "Timeout seconds per ping."},
+            },
+            "required": ["agents"],
+        },
+    },
+    {
+        "name": "adapt_nats_direct",
+        "description": "Send a direct NATS message to one Adapt nova and return the reply.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent": {"type": "string", "description": "Nova agent name."},
+                "message": {"type": "string", "description": "Message to send."},
+                "timeout": {"type": "number", "description": "Reply timeout seconds."},
+            },
+            "required": ["agent", "message"],
+        },
+    },
+    {
+        "name": "adapt_nats_group",
+        "description": "Send the same NATS room message to multiple Adapt novas.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agents": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Nova agent names to message.",
+                },
+                "message": {"type": "string", "description": "Message to send."},
+                "timeout": {"type": "number", "description": "Reply timeout seconds."},
+            },
+            "required": ["agents", "message"],
+        },
+    },
+]
 
 
 def _strip_env_value(raw_value: str) -> str:
@@ -184,6 +312,252 @@ def tool_policy() -> dict[str, Any]:
         "approvalPolicy": os.environ.get("VOICE_AGENT_APPROVAL_POLICY", "never"),
         "toolScope": os.environ.get("VOICE_AGENT_TOOL_SCOPE", "all"),
     }
+
+
+def tool_prompt() -> str:
+    """Return operator instructions that make Deepgram function use reliable."""
+
+    names = ", ".join(definition["name"] for definition in VOICE_TOOL_DEFINITIONS)
+    return (
+        "\n\nAdapt tool mode is enabled. Use these functions directly when the "
+        f"operator asks for system, file, NATS, service, git, or agent work: {names}. "
+        "Do not invent command output. After a tool call, summarize the result briefly."
+    )
+
+
+def redact_sensitive(value: str) -> str:
+    """Redact common secret shapes from tool output before returning it to the agent."""
+
+    redacted = SECRET_LINE_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", value)
+    return AUTH_VALUE_RE.sub(lambda match: f"{match.group(1)} [REDACTED]", redacted)
+
+
+def trim_tool_output(value: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
+    """Bound tool output so function responses stay small enough for the voice agent."""
+
+    if len(value) <= limit:
+        return value
+    omitted = len(value) - limit
+    return f"{value[:limit]}\n...[truncated {omitted} chars]"
+
+
+def resolve_tool_path(path: str) -> Path:
+    """Resolve a tool path, using voice home for relative paths."""
+
+    raw_path = Path(path).expanduser()
+    if raw_path.is_absolute():
+        return raw_path
+    return voice_home() / raw_path
+
+
+def tool_timeout(value: Any, default: float, maximum: float) -> float:
+    """Clamp a caller-provided timeout to a bounded operational range."""
+
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        timeout = default
+    return min(max(timeout, 0.5), maximum)
+
+
+def parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
+    """Parse Deepgram function arguments into a dictionary."""
+
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+    if raw_arguments in (None, ""):
+        return {}
+    if isinstance(raw_arguments, str):
+        parsed = json.loads(raw_arguments)
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError("tool arguments must be a JSON object")
+
+
+async def tool_adapt_shell(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Run a shell command under the active voice-agent execution policy."""
+
+    command = str(arguments.get("command") or "").strip()
+    if not command:
+        raise ValueError("command is required")
+
+    cwd = resolve_tool_path(str(arguments.get("cwd") or "."))
+    if not cwd.exists() or not cwd.is_dir():
+        raise ValueError(f"cwd does not exist or is not a directory: {cwd}")
+
+    timeout = tool_timeout(arguments.get("timeout"), default=60, maximum=300)
+    sudo_requested = bool(arguments.get("sudo"))
+    allow_sudo = bool(tool_policy()["allowSudo"])
+    if sudo_requested and not allow_sudo:
+        raise PermissionError("sudo is disabled by VOICE_AGENT_ALLOW_SUDO")
+
+    argv = (
+        ["sudo", "-n", "/bin/bash", "-lc", command]
+        if sudo_requested
+        else ["/bin/bash", "-lc", command]
+    )
+    started_at = datetime.now(timezone.utc).isoformat()
+    process = await asyncio.create_subprocess_exec(
+        *argv,
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        timed_out = False
+    except asyncio.TimeoutError:
+        process.kill()
+        stdout_bytes, stderr_bytes = await process.communicate()
+        timed_out = True
+
+    stdout = redact_sensitive(stdout_bytes.decode("utf-8", errors="replace"))
+    stderr = redact_sensitive(stderr_bytes.decode("utf-8", errors="replace"))
+    return {
+        "ok": process.returncode == 0 and not timed_out,
+        "tool": "adapt_shell",
+        "command": command,
+        "cwd": str(cwd),
+        "sudo": sudo_requested,
+        "timedOut": timed_out,
+        "returncode": process.returncode,
+        "startedAt": started_at,
+        "stdout": trim_tool_output(stdout),
+        "stderr": trim_tool_output(stderr),
+    }
+
+
+async def tool_adapt_read_file(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Read a local file for the voice agent."""
+
+    path = resolve_tool_path(str(arguments.get("path") or ""))
+    if not str(arguments.get("path") or "").strip():
+        raise ValueError("path is required")
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(str(path))
+
+    max_bytes = int(
+        tool_timeout(arguments.get("max_bytes"), default=65536, maximum=MAX_TOOL_FILE_BYTES)
+    )
+    data = path.read_bytes()[:max_bytes]
+    content = redact_sensitive(data.decode("utf-8", errors="replace"))
+    truncated = path.stat().st_size > len(data)
+    return {
+        "ok": True,
+        "tool": "adapt_read_file",
+        "path": str(path),
+        "bytesRead": len(data),
+        "truncated": truncated,
+        "content": trim_tool_output(content),
+    }
+
+
+async def tool_adapt_write_file(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Write or append a local text file for the voice agent."""
+
+    raw_path = str(arguments.get("path") or "").strip()
+    if not raw_path:
+        raise ValueError("path is required")
+    content = str(arguments.get("content") or "")
+    encoded = content.encode("utf-8")
+    if len(encoded) > MAX_TOOL_WRITE_BYTES:
+        raise ValueError(f"content exceeds {MAX_TOOL_WRITE_BYTES} bytes")
+
+    path = resolve_tool_path(raw_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = "a" if bool(arguments.get("append")) else "w"
+    with path.open(mode, encoding="utf-8") as handle:
+        handle.write(content)
+    return {
+        "ok": True,
+        "tool": "adapt_write_file",
+        "path": str(path),
+        "bytesWritten": len(encoded),
+        "append": bool(arguments.get("append")),
+    }
+
+
+async def tool_adapt_nats_ping(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Ping selected NATS agents for a voice function call."""
+
+    raw_agents = arguments.get("agents") or []
+    if not isinstance(raw_agents, list):
+        raise ValueError("agents must be a list")
+    agents = [_valid_agent_name(str(agent)) for agent in raw_agents[:16]]
+    if not agents:
+        raise ValueError("at least one agent is required")
+    timeout = tool_timeout(arguments.get("timeout"), default=1.2, maximum=8)
+    return {"ok": True, "tool": "adapt_nats_ping", "results": await _nats_ping(agents, timeout)}
+
+
+async def tool_adapt_nats_direct(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Send a direct NATS message for a voice function call."""
+
+    agent = _valid_agent_name(str(arguments.get("agent") or "iris"))
+    message = str(arguments.get("message") or "").strip()
+    if not message:
+        raise ValueError("message is required")
+    timeout = tool_timeout(arguments.get("timeout"), default=45, maximum=120)
+    return {
+        "ok": True,
+        "tool": "adapt_nats_direct",
+        "result": await _nats_roundtrip(agent, "direct", message, timeout),
+    }
+
+
+async def tool_adapt_nats_group(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Send a NATS group message for a voice function call."""
+
+    raw_agents = arguments.get("agents") or []
+    if not isinstance(raw_agents, list):
+        raise ValueError("agents must be a list")
+    agents = [_valid_agent_name(str(agent)) for agent in raw_agents[:8]]
+    message = str(arguments.get("message") or "").strip()
+    if not agents:
+        raise ValueError("at least one agent is required")
+    if not message:
+        raise ValueError("message is required")
+
+    timeout = tool_timeout(arguments.get("timeout"), default=60, maximum=120)
+    results = await asyncio.gather(
+        *(_nats_roundtrip(agent, "meet", message, timeout) for agent in agents),
+        return_exceptions=True,
+    )
+    payload: list[dict[str, Any]] = []
+    for agent, result in zip(agents, results, strict=False):
+        if isinstance(result, Exception):
+            payload.append({"agent": agent, "error": str(result), "timedOut": True})
+        else:
+            payload.append(result)
+    return {"ok": True, "tool": "adapt_nats_group", "results": payload}
+
+
+async def execute_voice_tool(name: str, raw_arguments: Any) -> dict[str, Any]:
+    """Execute a named voice tool and return a JSON-serializable result."""
+
+    arguments = parse_tool_arguments(raw_arguments)
+    tool_map = {
+        "adapt_tool_policy": lambda _: {
+            "ok": True,
+            "tool": "adapt_tool_policy",
+            "policy": tool_policy(),
+            "tools": [definition["name"] for definition in VOICE_TOOL_DEFINITIONS],
+        },
+        "adapt_shell": tool_adapt_shell,
+        "adapt_read_file": tool_adapt_read_file,
+        "adapt_write_file": tool_adapt_write_file,
+        "adapt_nats_ping": tool_adapt_nats_ping,
+        "adapt_nats_direct": tool_adapt_nats_direct,
+        "adapt_nats_group": tool_adapt_nats_group,
+    }
+    handler = tool_map.get(name)
+    if handler is None:
+        raise ValueError(f"unknown tool: {name}")
+
+    result = handler(arguments)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
 
 
 def roster_agents() -> list[dict[str, Any]]:
@@ -353,6 +727,7 @@ def public_config() -> dict[str, Any]:
             "personaplex": "https://research.nvidia.com/labs/adlr/personaplex/",
         },
         "toolPolicy": tool_policy(),
+        "tools": [definition["name"] for definition in VOICE_TOOL_DEFINITIONS],
     }
 
 
@@ -499,6 +874,22 @@ async def api_nats_group(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "results": payload})
 
 
+@app.post("/api/tools/execute")
+async def api_tools_execute(request: Request) -> JSONResponse:
+    """Execute a voice tool through the same server-side dispatcher used by Deepgram."""
+
+    body = await request.json()
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
+    try:
+        result = await execute_voice_tool(name, body.get("arguments") or {})
+    except Exception as exc:
+        LOGGER.warning("Voice tool execution failed: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc), "tool": name}, status_code=400)
+    return JSONResponse({"ok": True, "result": result})
+
+
 @app.websocket("/ws/voice")
 async def ws_voice_proxy(browser: WebSocket) -> None:
     """Relay browser PCM and JSON settings to Deepgram Voice Agent."""
@@ -573,6 +964,8 @@ def rewrite_settings_message(message: str) -> str:
     think_url = os.environ.get("VOICE_AGENT_THINK_URL", DEFAULT_THINK_URL)
 
     agent = payload.setdefault("agent", {})
+    previous_think = agent.get("think") if isinstance(agent.get("think"), dict) else {}
+    previous_prompt = str(previous_think.get("prompt") or public_config()["prompt"])
     headers = {"content-type": "application/json"}
     if "dg.adaptdev.ai" in think_url:
         if proxy_token:
@@ -595,9 +988,50 @@ def rewrite_settings_message(message: str) -> str:
             "url": think_url,
             "headers": headers,
         },
-        "prompt": public_config()["prompt"],
+        "prompt": f"{previous_prompt}{tool_prompt()}",
+        "functions": VOICE_TOOL_DEFINITIONS,
     }
     return json.dumps(payload, separators=(",", ":"))
+
+
+async def handle_function_call_request(
+    payload: dict[str, Any], upstream: Any, browser: WebSocket
+) -> None:
+    """Execute Deepgram client-side function requests and return responses upstream."""
+
+    functions = payload.get("functions") or []
+    if not isinstance(functions, list):
+        return
+    for function_call in functions:
+        if not isinstance(function_call, dict):
+            continue
+        if function_call.get("client_side") is False:
+            continue
+
+        call_id = str(function_call.get("id") or "")
+        name = str(function_call.get("name") or "")
+        try:
+            result = await execute_voice_tool(name, function_call.get("arguments"))
+        except Exception as exc:
+            LOGGER.warning("Voice function call failed: %s", exc)
+            result = {"ok": False, "tool": name, "error": str(exc)}
+
+        response = {
+            "type": "FunctionCallResponse",
+            "id": call_id,
+            "name": name,
+            "content": json.dumps(result, separators=(",", ":")),
+        }
+        if function_call.get("thought_signature"):
+            response["thought_signature"] = function_call["thought_signature"]
+
+        await upstream.send(json.dumps(response, separators=(",", ":")))
+        try:
+            await browser.send_json(
+                {"type": "VoiceToolResult", "id": call_id, "name": name, "result": result}
+            )
+        except Exception:
+            LOGGER.debug("Browser closed before VoiceToolResult could be sent")
 
 
 async def _deepgram_to_browser(upstream: Any, browser: WebSocket) -> None:
@@ -607,7 +1041,13 @@ async def _deepgram_to_browser(upstream: Any, browser: WebSocket) -> None:
         if isinstance(message, bytes):
             await browser.send_bytes(message)
         else:
+            try:
+                payload = json.loads(message)
+            except json.JSONDecodeError:
+                payload = None
             await browser.send_text(message)
+            if isinstance(payload, dict) and payload.get("type") == "FunctionCallRequest":
+                await handle_function_call_request(payload, upstream, browser)
 
 
 def main() -> None:
