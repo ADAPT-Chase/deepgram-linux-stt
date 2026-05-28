@@ -46,6 +46,7 @@ class SttConfig:
     model_name: str
     deepgram_model: str
     deepgram_key_envs: tuple[str, ...]
+    deepgram_timeout_s: float
     local_fallback: bool
     log_path: Path
     threshold: int
@@ -81,6 +82,7 @@ def load_config() -> SttConfig:
             ).split(",")
             if key.strip()
         ),
+        deepgram_timeout_s=float(os.getenv("REMOTE_STT_DEEPGRAM_TIMEOUT_S", "12")),
         local_fallback=os.getenv("REMOTE_STT_LOCAL_FALLBACK", "0") == "1",
         log_path=Path(
             os.getenv("REMOTE_STT_LOG", "/adapt/projects/stt/remote_transcriptions.txt")
@@ -112,12 +114,12 @@ class HotkeyController:
     """Thread-safe STT controls with typing and readback hotkeys."""
 
     def __init__(self, enabled: bool, state_path: Path, readback_enabled: bool) -> None:
-        self._enabled = enabled
         self._state_path = state_path
         self._readback_enabled = readback_enabled
         self._lock = threading.Lock()
         self._pressed: set[keyboard.Key | keyboard.KeyCode] = set()
-        self._write_state(enabled)
+        self._enabled = self._read_state(default=enabled)
+        self._write_state(self._enabled)
 
     def enabled(self) -> bool:
         """Return whether recognized text should be typed into the active window."""
@@ -178,6 +180,13 @@ class HotkeyController:
     def _write_state(self, enabled: bool) -> None:
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._state_path.write_text("on\n" if enabled else "muted\n", encoding="utf-8")
+
+    def _read_state(self, default: bool) -> bool:
+        try:
+            value = self._state_path.read_text(encoding="utf-8").strip().lower()
+        except OSError:
+            return default
+        return value in {"on", "true", "1", "enabled", "unmuted"}
 
     def _ctrl_down(self) -> bool:
         return (
@@ -507,16 +516,26 @@ def transcribe_with_deepgram(pcm: bytes, config: SttConfig) -> str:
             continue
 
         try:
+            started_at = time.monotonic()
             response = requests.post(
                 url,
                 params=params,
                 headers={**headers, "Authorization": f"Token {api_key}"},
                 data=wav_bytes,
-                timeout=30,
+                timeout=(3.05, config.deepgram_timeout_s),
             )
         except requests.RequestException as exc:
             print(f"Deepgram request failed via {key_env}: {exc}", file=sys.stderr, flush=True)
             continue
+
+        elapsed_ms = (time.monotonic() - started_at) * 1000
+        if elapsed_ms >= 1500:
+            audio_ms = len(pcm) / (SAMPLE_RATE * CHANNELS * SAMPLE_WIDTH_BYTES) * 1000
+            print(
+                f"Deepgram STT latency {elapsed_ms:.0f} ms via {key_env} "
+                f"status={response.status_code} audio_ms={audio_ms:.0f}",
+                flush=True,
+            )
 
         if response.status_code in {401, 402, 403, 429}:
             print(
@@ -609,8 +628,15 @@ def main() -> int:
     print(
         "Remote STT starting "
         f"source={config.source} provider={config.provider} model={model_label} "
-        f"log={config.log_path} typing={'on' if config.type_text else 'muted'} "
+        f"log={config.log_path} typing={'on' if hotkey_controller.enabled() else 'muted'} "
         f"state={config.state_path}",
+        flush=True,
+    )
+    print(
+        "Remote STT segmentation "
+        f"threshold={config.threshold} silence_ms={config.silence_ms} "
+        f"min_speech_ms={config.min_speech_ms} max_segment_ms={config.max_segment_ms} "
+        f"deepgram_timeout_s={config.deepgram_timeout_s:g}",
         flush=True,
     )
 

@@ -1,0 +1,40 @@
+[Unit]
+Description=NoMachine remote microphone STT
+After=nomachine-audio-fix.service pipewire.service pipewire-pulse.service
+Wants=nomachine-audio-fix.service pipewire.service pipewire-pulse.service
+
+[Service]
+Type=simple
+WorkingDirectory=/adapt/projects/stt
+Environment=PYTHONUNBUFFERED=1
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/x/.Xauthority
+Environment=REMOTE_STT_SOURCE=nx_client_mic
+Environment=REMOTE_STT_PROVIDER=deepgram
+Environment=REMOTE_STT_DEEPGRAM_MODEL=nova-3
+Environment=REMOTE_STT_DEEPGRAM_KEY_ENVS=DEEPGRAM_API_KEY,DEEPGRAM_API_KEY_nc
+Environment=REMOTE_STT_DEEPGRAM_TIMEOUT_S=8
+Environment=REMOTE_STT_LOCAL_FALLBACK=0
+Environment=REMOTE_STT_MODEL=tiny.en
+Environment=REMOTE_STT_LOG=/adapt/projects/stt/remote_transcriptions.txt
+Environment=REMOTE_STT_THRESHOLD=220
+Environment=REMOTE_STT_SILENCE_MS=550
+Environment=REMOTE_STT_MIN_SPEECH_MS=300
+Environment=REMOTE_STT_MAX_SEGMENT_MS=4000
+Environment=REMOTE_STT_BEAM_SIZE=1
+Environment=REMOTE_STT_VAD_FILTER=1
+Environment=REMOTE_STT_CONDITION_PREVIOUS=0
+Environment=REMOTE_STT_NO_SPEECH_THRESHOLD=0.6
+Environment=REMOTE_STT_TYPE_TEXT=0
+Environment=REMOTE_STT_HOTKEY=ctrl+space
+Environment=REMOTE_STT_STATE=/run/user/1000/remote-stt.state
+Environment=REMOTE_STT_READBACK=1
+Environment=REMOTE_STT_READBACK_MAX_CHARS=1200
+Environment=REMOTE_STT_TTS_CMD=/data/vast/home/x/.hermes/hermes-agent/venv/bin/edge-tts
+Environment=REMOTE_STT_TTS_VOICE=en-US-AvaMultilingualNeural
+ExecStart=/adapt/projects/stt/run_nomachine_remote_stt.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

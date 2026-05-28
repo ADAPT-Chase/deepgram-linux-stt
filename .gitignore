@@ -33,6 +33,7 @@ deepgram-python-sdk/
 
 # Logs
 *.log
+!ops/decisions.log
 transcriptions.txt
 remote_transcriptions.txt
 
