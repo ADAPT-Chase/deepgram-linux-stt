@@ -36,6 +36,7 @@ DEFAULT_THINK_MODEL = "deepseek-v4-flash"
 DEFAULT_PROXY_AUTH_KEY_ENVS = ("sage_20500_gateway_token",)
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 DEFAULT_DB_SECRET_FILE = Path("/adapt/secrets/db.env")
+DEFAULT_VOICE_HOME = Path("/adapt/novas/active/voice")
 ROSTER_PATH = Path("/adapt/platform/novaops/controlplane/pipecat-voice/roster.json")
 NOVA_SUBJECT_NS = "nova"
 NATS_SENDER = "voice-agent-gui"
@@ -158,6 +159,31 @@ def nats_url() -> str:
     if value:
         return value
     return load_secret_from_file(DEFAULT_DB_SECRET_FILE, ("NATS_URL",))
+
+
+def _enabled_env(name: str, default: str = "0") -> bool:
+    """Return true for explicit operator-enabled env flags."""
+
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on", "yolo"}
+
+
+def voice_home() -> Path:
+    """Return the operator-approved voice agent workspace."""
+
+    return Path(os.environ.get("VOICE_AGENT_HOME", str(DEFAULT_VOICE_HOME))).expanduser()
+
+
+def tool_policy() -> dict[str, Any]:
+    """Return the active server-side tool execution policy without secrets."""
+
+    return {
+        "home": str(voice_home()),
+        "sandbox": os.environ.get("VOICE_AGENT_SANDBOX", "none"),
+        "yolo": _enabled_env("VOICE_AGENT_YOLO", "1"),
+        "allowSudo": _enabled_env("VOICE_AGENT_ALLOW_SUDO", "1"),
+        "approvalPolicy": os.environ.get("VOICE_AGENT_APPROVAL_POLICY", "never"),
+        "toolScope": os.environ.get("VOICE_AGENT_TOOL_SCOPE", "all"),
+    }
 
 
 def roster_agents() -> list[dict[str, Any]]:
@@ -326,6 +352,7 @@ def public_config() -> dict[str, Any]:
             "deepseek": "https://api-docs.deepseek.com/api/create-chat-completion",
             "personaplex": "https://research.nvidia.com/labs/adlr/personaplex/",
         },
+        "toolPolicy": tool_policy(),
     }
 
 
@@ -380,6 +407,7 @@ async def api_health() -> JSONResponse:
             "deepgramKeyConfigured": bool(deepgram_key()),
             "deepseekKeyConfigured": bool(deepseek_key()),
             "proxyAuthConfigured": bool(proxy_auth_token()),
+            "toolPolicy": tool_policy(),
             "endpoint": VOICE_AGENT_URL,
             "thinkUrl": public_config()["thinkUrl"],
             "thinkModel": public_config()["thinkModel"],
@@ -896,6 +924,7 @@ HTML = """<!doctype html>
               <span class="pill" id="keyState">keys: checking</span>
               <span class="pill">Deepgram Voice Agent API</span>
               <span class="pill" id="thinkState">Think: DeepSeek</span>
+              <span class="pill" id="toolState">Tools: checking</span>
               <span class="pill">NVIDIA PersonaPlex tracked</span>
             </div>
           </div>
@@ -1292,6 +1321,13 @@ HTML = """<!doctype html>
         $("thinkUrl").value = config.thinkUrl;
         $("thinkModel").value = config.thinkModel;
         $("thinkState").textContent = `Think: ${config.thinkModel}`;
+        if (config.toolPolicy) {
+          const policy = config.toolPolicy;
+          $("toolState").textContent = policy.yolo
+            ? `Tools: YOLO / ${policy.sandbox}`
+            : `Tools: ${policy.sandbox}`;
+          $("toolState").title = `home=${policy.home}; sudo=${policy.allowSudo}; approval=${policy.approvalPolicy}; scope=${policy.toolScope}`;
+        }
         $("listenModel").value = config.listenModel;
         $("speakModel").value = config.speakModel;
         $("prompt").value = config.prompt;

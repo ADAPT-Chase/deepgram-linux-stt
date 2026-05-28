@@ -15,6 +15,13 @@ Environment=VOICE_AGENT_LISTEN_MODEL=nova-2
 Environment=VOICE_AGENT_THINK_URL=https://dg.adaptdev.ai/v1/chat/completions
 Environment=VOICE_AGENT_THINK_MODEL=deepseek-v4-flash
 Environment=VOICE_AGENT_PROXY_AUTH_KEY_ENVS=sage_20500_gateway_token
+Environment=HOME=/adapt/novas/active/voice
+Environment=VOICE_AGENT_HOME=/adapt/novas/active/voice
+Environment=VOICE_AGENT_YOLO=1
+Environment=VOICE_AGENT_ALLOW_SUDO=1
+Environment=VOICE_AGENT_SANDBOX=none
+Environment=VOICE_AGENT_APPROVAL_POLICY=never
+Environment=VOICE_AGENT_TOOL_SCOPE=all
 ExecStart=/usr/bin/python3 /adapt/projects/stt/deepgram_voice_agent_gui.py
 Restart=always
 RestartSec=2
