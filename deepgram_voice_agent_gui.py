@@ -40,6 +40,13 @@ VOICE_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse"
 DEFAULT_THINK_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_THINK_MODEL = "deepseek-v4-flash"
 DEFAULT_PROXY_AUTH_KEY_ENVS = ("sage_20500_gateway_token",)
+DEFAULT_DICTATION_POLISH_SYSTEM_PROMPT = (
+    "You are a dictation cleanup filter. Rewrite the transcript only to fix "
+    "speech-to-text formatting: capitalization, punctuation, paragraph breaks, "
+    "obvious immediate duplicate words, and obvious spoken punctuation. Preserve "
+    "meaning, names, technical terms, and the speaker's voice. Do not answer the "
+    "text. Do not add commentary. Output only the corrected text."
+)
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 DEFAULT_DB_SECRET_FILE = Path("/adapt/secrets/db.env")
 DEFAULT_VOICE_HOME = Path("/adapt/novas/active/voice")
@@ -99,6 +106,10 @@ DICTATION_MUTE_ON_RE = re.compile(
 )
 DICTATION_MUTE_OFF_RE = re.compile(
     r"^\s*(?:unmute|mute off|typing on|dictation on|start typing)\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+DICTATION_KEY_COMMAND_RE = re.compile(
+    r"\b(?:new paragraph|new line|newline|next line|enter|return|tab)\b",
     re.IGNORECASE,
 )
 
@@ -1394,8 +1405,8 @@ async def ws_dictation(browser: WebSocket) -> None:
         peak_rms = 0
         if not pcm:
             return
-        transcript = await asyncio.to_thread(transcribe_dictation_pcm, pcm)
-        mute_command = dictation_mute_command(transcript)
+        raw_transcript = await asyncio.to_thread(transcribe_dictation_pcm, pcm)
+        mute_command = dictation_mute_command(raw_transcript)
         if mute_command is not None:
             typing_enabled = mute_command
             await browser.send_json({"type": "typing", "enabled": typing_enabled})
@@ -1404,17 +1415,23 @@ async def ws_dictation(browser: WebSocket) -> None:
                     "type": "segment",
                     "audioMs": round(audio_ms),
                     "peakRms": segment_peak_rms,
-                    "text": transcript,
+                    "text": raw_transcript,
                     "command": "typing_on" if typing_enabled else "typing_off",
                 }
             )
             return
+
+        transcript = raw_transcript
+        if raw_transcript and typing_enabled:
+            transcript = await asyncio.to_thread(polish_dictation_text, raw_transcript)
         await browser.send_json(
             {
                 "type": "segment",
                 "audioMs": round(audio_ms),
                 "peakRms": segment_peak_rms,
                 "text": transcript,
+                "rawText": raw_transcript if raw_transcript != transcript else "",
+                "polished": raw_transcript != transcript,
             }
         )
         if transcript and typing_enabled:
@@ -1583,6 +1600,115 @@ def dictation_mute_command(text: str) -> bool | None:
     if DICTATION_MUTE_OFF_RE.match(text):
         return True
     return None
+
+
+def polish_dictation_text(text: str) -> str:
+    """Clean up dictation punctuation and formatting through the configured LLM route."""
+
+    candidate = text.strip()
+    if not should_polish_dictation_text(candidate):
+        return candidate
+
+    url = os.environ.get(
+        "VOICE_AGENT_DICTATION_POLISH_URL",
+        os.environ.get("VOICE_AGENT_THINK_URL", DEFAULT_THINK_URL),
+    )
+    headers = {"content-type": "application/json"}
+    if "dg.adaptdev.ai" in url:
+        token = proxy_auth_token()
+        if not token:
+            LOGGER.warning("Dictation polish skipped: proxy auth token is not configured")
+            return candidate
+        headers["authorization"] = f"Bearer {token}"
+    else:
+        key = deepseek_key()
+        if not key:
+            LOGGER.warning("Dictation polish skipped: DeepSeek key is not configured")
+            return candidate
+        headers["authorization"] = f"Bearer {key}"
+
+    payload = {
+        "model": os.environ.get(
+            "VOICE_AGENT_DICTATION_POLISH_MODEL",
+            os.environ.get("VOICE_AGENT_THINK_MODEL", DEFAULT_THINK_MODEL),
+        ),
+        "temperature": float(os.environ.get("VOICE_AGENT_DICTATION_POLISH_TEMPERATURE", "0")),
+        "max_tokens": int(os.environ.get("VOICE_AGENT_DICTATION_POLISH_MAX_TOKENS", "320")),
+        "messages": [
+            {
+                "role": "system",
+                "content": os.environ.get(
+                    "VOICE_AGENT_DICTATION_POLISH_PROMPT",
+                    DEFAULT_DICTATION_POLISH_SYSTEM_PROMPT,
+                ),
+            },
+            {"role": "user", "content": candidate},
+        ],
+    }
+
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=(
+                float(os.environ.get("VOICE_AGENT_DICTATION_POLISH_CONNECT_TIMEOUT", "2")),
+                float(os.environ.get("VOICE_AGENT_DICTATION_POLISH_READ_TIMEOUT", "5")),
+            ),
+        )
+        response.raise_for_status()
+        polished = extract_chat_completion_text(response.json()).strip()
+    except Exception as exc:
+        LOGGER.warning("Dictation polish failed; using raw transcript: %s", exc)
+        return candidate
+
+    if not valid_polished_dictation(candidate, polished):
+        return candidate
+    return polished
+
+
+def should_polish_dictation_text(text: str) -> bool:
+    """Return true when a transcript should be sent to the formatting LLM."""
+
+    if not _enabled_env("VOICE_AGENT_DICTATION_POLISH"):
+        return False
+    min_chars = int(os.environ.get("VOICE_AGENT_DICTATION_POLISH_MIN_CHARS", "12"))
+    max_chars = int(os.environ.get("VOICE_AGENT_DICTATION_POLISH_MAX_CHARS", "1200"))
+    if len(text) < min_chars or len(text) > max_chars:
+        return False
+    return DICTATION_KEY_COMMAND_RE.search(text) is None
+
+
+def extract_chat_completion_text(payload: dict[str, Any]) -> str:
+    """Extract assistant text from an OpenAI-compatible chat completion response."""
+
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    message = first.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+    text = first.get("text")
+    return text if isinstance(text, str) else ""
+
+
+def valid_polished_dictation(raw_text: str, polished_text: str) -> bool:
+    """Reject empty or suspiciously divergent LLM cleanup output."""
+
+    if not polished_text:
+        return False
+    raw_len = len(raw_text)
+    polished_len = len(polished_text)
+    if polished_len > max(raw_len * 3, raw_len + 160):
+        return False
+    if polished_len < max(1, raw_len // 4):
+        return False
+    return True
 
 
 def normalize_spoken_punctuation(text: str) -> str:
@@ -1834,6 +1960,8 @@ DICTATION_HTML = """<!doctype html>
           const text = msg.text || "";
           if (msg.command) {
             log(`${msg.command}: ${text}`);
+          } else if (msg.polished && msg.rawText) {
+            log(`polished: ${msg.rawText} -> ${text}`);
           } else {
             log(text || `blank segment peak=${msg.peakRms} audio=${msg.audioMs}ms`, text ? "" : "empty");
           }

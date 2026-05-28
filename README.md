@@ -93,6 +93,13 @@ This path bypasses NoMachine microphone forwarding. The browser sends 16 kHz
 PCM to the server, the server transcribes through Deepgram `nova-3`, and
 recognized text is typed into the active X11 text box with `xdotool`.
 
+When `VOICE_AGENT_DICTATION_POLISH=1`, completed dictation segments are routed
+through the configured OpenAI-compatible LLM endpoint before typing. This pass is
+limited to punctuation, capitalization, paragraph formatting, and obvious STT
+duplicate-word cleanup. Spoken key commands are handled locally and skip the LLM
+cleanup path. The systemd unit gives the cleanup route a 15-second read timeout
+and falls back to the raw transcript if the provider is slow or unavailable.
+
 Spoken dictation commands:
 - `enter`, `return`, `new line`, `new paragraph`
 - `tab`

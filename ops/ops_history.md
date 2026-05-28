@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-05-28 05:37:09 — sable
+Added optional LLM-backed cleanup for `/dictation`. Completed STT segments now pass through the configured bearer-auth OpenAI-compatible LLM endpoint when `VOICE_AGENT_DICTATION_POLISH=1`, with cleanup constrained to punctuation, capitalization, paragraph formatting, and obvious duplicate words. Spoken key commands skip the LLM path. Installed the updated user systemd unit, restarted `deepgram-voice-agent-gui.service`, verified live service environment, verified `/dictation` delivery, and smoke-tested the cleanup route through `https://dg.adaptdev.ai/v1/chat/completions`.
+
 ## 2026-05-28 05:24:50 — sable
 Added spoken mute/unmute controls to `/dictation`. The browser-microphone path now treats `mute`, `mute on`, `typing off`, `dictation off`, and `stop typing` as commands to keep listening while suppressing text insertion, and treats `unmute`, `mute off`, `typing on`, `dictation on`, and `start typing` as commands to resume insertion. Updated README command notes and verified parser behavior, page delivery, and service state.
 

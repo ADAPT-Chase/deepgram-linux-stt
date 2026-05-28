@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-05-28 05:37:09 — sable
+Decision: Use the existing LLM proxy as a post-STT formatting pass instead of embeddings.
+Rationale: Embeddings cannot directly repair punctuation or formatting; a low-temperature chat-completions rewrite can, and the dictation path can fall back to raw STT output if the provider is slow or unavailable.
+
 ## 2026-05-28 05:24:50 — sable
 Decision: Implement voice mute as a typing-state toggle, not a microphone disconnect.
 Rationale: The operator needs to speak freely without text going into the wrong box, while preserving low-friction recovery and avoiding microphone permission churn.
