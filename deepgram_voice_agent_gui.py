@@ -52,6 +52,8 @@ AUTH_VALUE_RE = re.compile(
 MAX_TOOL_OUTPUT_CHARS = 12000
 MAX_TOOL_FILE_BYTES = 262144
 MAX_TOOL_WRITE_BYTES = 1048576
+VOICE_MEMORY_FILE = "voice_memory.jsonl"
+VOICE_MEMORY_LOCK = asyncio.Lock()
 VOICE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "adapt_tool_policy",
@@ -168,6 +170,102 @@ VOICE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "timeout": {"type": "number", "description": "Reply timeout seconds."},
             },
             "required": ["agents", "message"],
+        },
+    },
+    {
+        "name": "voice_remember",
+        "description": (
+            "Store a durable local voice memory in the voice agent runtime home. "
+            "Use for operator preferences, current project context, recurring facts, "
+            "and short-term session continuity."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "Memory text to store."},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tags for recall.",
+                },
+                "source": {"type": "string", "description": "Optional source label."},
+                "importance": {
+                    "type": "number",
+                    "description": "Optional importance from 0 to 1. Defaults to 0.5.",
+                },
+            },
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "voice_recall",
+        "description": "Search local voice memories by query and/or tags.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional search query."},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tags to filter by.",
+                },
+                "limit": {"type": "number", "description": "Maximum memories to return."},
+            },
+        },
+    },
+    {
+        "name": "voice_forget",
+        "description": "Remove local voice memories by id.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Memory ids to remove.",
+                }
+            },
+            "required": ["ids"],
+        },
+    },
+    {
+        "name": "hermes_remember",
+        "description": (
+            "Send a durable memory note to the Hermes/Mnemos nova over NATS and "
+            "also keep a local voice copy."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "Memory text to persist."},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tags for recall.",
+                },
+                "agent": {
+                    "type": "string",
+                    "description": "Hermes memory nova target. Defaults to mnemos.",
+                },
+                "timeout": {"type": "number", "description": "NATS reply timeout seconds."},
+            },
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "hermes_recall",
+        "description": "Ask the Hermes/Mnemos nova to recall durable fleet memory.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Recall query."},
+                "agent": {
+                    "type": "string",
+                    "description": "Hermes memory nova target. Defaults to mnemos.",
+                },
+                "timeout": {"type": "number", "description": "NATS reply timeout seconds."},
+            },
+            "required": ["query"],
         },
     },
 ]
@@ -374,6 +472,234 @@ def parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
     raise ValueError("tool arguments must be a JSON object")
 
 
+def voice_memory_path() -> Path:
+    """Return the local JSONL memory path."""
+
+    return voice_home() / "state" / VOICE_MEMORY_FILE
+
+
+def normalize_tags(raw_tags: Any) -> list[str]:
+    """Normalize memory tags to short lowercase labels."""
+
+    if raw_tags is None:
+        return []
+    if isinstance(raw_tags, str):
+        candidates = re.split(r"[, ]+", raw_tags)
+    elif isinstance(raw_tags, list):
+        candidates = [str(tag) for tag in raw_tags]
+    else:
+        raise ValueError("tags must be a list or comma-separated string")
+    tags: list[str] = []
+    for candidate in candidates:
+        tag = re.sub(r"[^a-z0-9_.:-]+", "-", candidate.strip().lower()).strip("-")
+        if tag and tag not in tags:
+            tags.append(tag[:64])
+    return tags[:16]
+
+
+def bounded_importance(value: Any) -> float:
+    """Clamp a memory importance score to the 0..1 range."""
+
+    try:
+        importance = float(value)
+    except (TypeError, ValueError):
+        importance = 0.5
+    return min(max(importance, 0.0), 1.0)
+
+
+def assert_memory_content_safe(content: str) -> None:
+    """Prevent accidental storage of obvious secret material."""
+
+    if SECRET_LINE_RE.search(content) or AUTH_VALUE_RE.search(content):
+        raise ValueError("memory content appears to contain a secret, token, or password")
+
+
+def load_voice_memories() -> list[dict[str, Any]]:
+    """Load local voice memory entries from JSONL."""
+
+    path = voice_memory_path()
+    if not path.exists():
+        return []
+    memories: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            memory = json.loads(line)
+        except json.JSONDecodeError:
+            LOGGER.warning("Skipping corrupt voice memory line in %s", path)
+            continue
+        if isinstance(memory, dict) and memory.get("id") and memory.get("content"):
+            memories.append(memory)
+    return memories
+
+
+def memory_score(memory: dict[str, Any], query: str, tags: list[str]) -> float:
+    """Score a memory entry for simple local recall."""
+
+    content = str(memory.get("content") or "").lower()
+    memory_tags = {str(tag).lower() for tag in memory.get("tags") or []}
+    score = float(memory.get("importance") or 0.0)
+    if tags:
+        matched_tags = sum(1 for tag in tags if tag in memory_tags)
+        if matched_tags != len(tags):
+            return -1.0
+        score += matched_tags * 3.0
+    if query:
+        terms = [term for term in re.split(r"\W+", query.lower()) if len(term) > 1]
+        if terms:
+            matched_terms = sum(1 for term in terms if term in content)
+            if matched_terms == 0:
+                return -1.0
+            score += matched_terms * 2.0
+            if query.lower() in content:
+                score += 5.0
+    return score
+
+
+async def store_voice_memory(
+    content: str,
+    tags: list[str],
+    source: str,
+    importance: float,
+    scope: str = "voice",
+) -> dict[str, Any]:
+    """Persist one local voice memory entry."""
+
+    content = content.strip()
+    if not content:
+        raise ValueError("content is required")
+    assert_memory_content_safe(content)
+
+    now = datetime.now(timezone.utc).isoformat()
+    memory = {
+        "id": f"vmem_{uuid.uuid4().hex[:16]}",
+        "createdAt": now,
+        "scope": scope,
+        "source": source[:80] if source else "voice-agent",
+        "importance": importance,
+        "tags": tags,
+        "content": content,
+    }
+    path = voice_memory_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    async with VOICE_MEMORY_LOCK:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(memory, separators=(",", ":")) + "\n")
+    return memory
+
+
+async def tool_voice_remember(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Store local voice memory."""
+
+    memory = await store_voice_memory(
+        content=str(arguments.get("content") or ""),
+        tags=normalize_tags(arguments.get("tags")),
+        source=str(arguments.get("source") or "voice-agent"),
+        importance=bounded_importance(arguments.get("importance")),
+    )
+    return {"ok": True, "tool": "voice_remember", "memory": memory}
+
+
+async def tool_voice_recall(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Recall local voice memories."""
+
+    query = str(arguments.get("query") or "").strip()
+    tags = normalize_tags(arguments.get("tags"))
+    limit = int(tool_timeout(arguments.get("limit"), default=8, maximum=32))
+    async with VOICE_MEMORY_LOCK:
+        memories = load_voice_memories()
+
+    scored = [
+        (memory_score(memory, query, tags), memory)
+        for memory in memories
+    ]
+    matches = [
+        memory
+        for score, memory in sorted(scored, key=lambda item: item[0], reverse=True)
+        if score >= 0
+    ][:limit]
+    return {
+        "ok": True,
+        "tool": "voice_recall",
+        "query": query,
+        "tags": tags,
+        "count": len(matches),
+        "memories": matches,
+    }
+
+
+async def tool_voice_forget(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Remove local voice memories by id."""
+
+    raw_ids = arguments.get("ids") or []
+    if isinstance(raw_ids, str):
+        ids = {raw_ids.strip()}
+    elif isinstance(raw_ids, list):
+        ids = {str(item).strip() for item in raw_ids}
+    else:
+        raise ValueError("ids must be a list or string")
+    ids.discard("")
+    if not ids:
+        raise ValueError("at least one id is required")
+
+    path = voice_memory_path()
+    async with VOICE_MEMORY_LOCK:
+        memories = load_voice_memories()
+        kept = [memory for memory in memories if str(memory.get("id")) not in ids]
+        removed = len(memories) - len(kept)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".jsonl.tmp")
+        with temp_path.open("w", encoding="utf-8") as handle:
+            for memory in kept:
+                handle.write(json.dumps(memory, separators=(",", ":")) + "\n")
+        temp_path.replace(path)
+    return {"ok": True, "tool": "voice_forget", "removed": removed, "ids": sorted(ids)}
+
+
+async def tool_hermes_remember(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Store local voice memory and forward it to Mnemos/Hermes over NATS."""
+
+    content = str(arguments.get("content") or "").strip()
+    tags = normalize_tags(arguments.get("tags"))
+    memory = await store_voice_memory(
+        content=content,
+        tags=tags,
+        source="hermes-remember",
+        importance=bounded_importance(arguments.get("importance")),
+        scope="hermes",
+    )
+    agent = _valid_agent_name(str(arguments.get("agent") or "mnemos"))
+    timeout = tool_timeout(arguments.get("timeout"), default=45, maximum=120)
+    message = (
+        "MEMORY WRITE REQUEST from Deepgram voice agent.\n"
+        f"Local memory id: {memory['id']}\n"
+        f"Tags: {', '.join(tags) if tags else '(none)'}\n"
+        "Persist this in durable Hermes/Mnemos fleet memory and reply with status.\n\n"
+        f"{content}"
+    )
+    result = await _nats_roundtrip(agent, "direct", message, timeout)
+    return {"ok": True, "tool": "hermes_remember", "memory": memory, "nats": result}
+
+
+async def tool_hermes_recall(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Ask Mnemos/Hermes to recall durable fleet memory."""
+
+    query = str(arguments.get("query") or "").strip()
+    if not query:
+        raise ValueError("query is required")
+    agent = _valid_agent_name(str(arguments.get("agent") or "mnemos"))
+    timeout = tool_timeout(arguments.get("timeout"), default=45, maximum=120)
+    message = (
+        "MEMORY RECALL REQUEST from Deepgram voice agent.\n"
+        "Search durable Hermes/Mnemos fleet memory and reply concisely with matches, "
+        "sources, and uncertainty.\n\n"
+        f"Query: {query}"
+    )
+    result = await _nats_roundtrip(agent, "direct", message, timeout)
+    return {"ok": True, "tool": "hermes_recall", "query": query, "nats": result}
+
+
 async def tool_adapt_shell(arguments: dict[str, Any]) -> dict[str, Any]:
     """Run a shell command under the active voice-agent execution policy."""
 
@@ -549,6 +875,11 @@ async def execute_voice_tool(name: str, raw_arguments: Any) -> dict[str, Any]:
         "adapt_nats_ping": tool_adapt_nats_ping,
         "adapt_nats_direct": tool_adapt_nats_direct,
         "adapt_nats_group": tool_adapt_nats_group,
+        "voice_remember": tool_voice_remember,
+        "voice_recall": tool_voice_recall,
+        "voice_forget": tool_voice_forget,
+        "hermes_remember": tool_hermes_remember,
+        "hermes_recall": tool_hermes_recall,
     }
     handler = tool_map.get(name)
     if handler is None:
