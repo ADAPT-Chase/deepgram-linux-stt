@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-05-28 03:11:25 — SIGNED_BY_AGENT
+Decision: Remove clipboard paste from browser dictation.
+Rationale: Codex/browser targets treat clipboard paste as an image-capable operation and can emit missing-image clipboard errors; serialized direct typing avoids clipboard side effects.
+
 ## 2026-05-28 02:33:44 — SIGNED_BY_AGENT
 Decision: Disable the legacy NoMachine remote STT daemon while `/dictation` is the active dictation path.
 Rationale: The daemon can be unmuted independently and then competes with browser dictation, causing duplicate or interleaved typed text.

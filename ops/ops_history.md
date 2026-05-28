@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-05-28 03:11:25 — SIGNED_BY_AGENT
+Removed clipboard paste from browser dictation because it triggered Codex/browser “Failed to paste image” clipboard errors. Browser dictation now uses only serialized direct `xdotool type` with a short delay. Restarted `deepgram-voice-agent-gui.service`, confirmed the legacy NoMachine STT daemon remains disabled/inactive, and verified synthetic WebSocket transcription with typing disabled.
+
 ## 2026-05-28 02:33:44 — SIGNED_BY_AGENT
 Fixed garbled dictation caused by two active transcription typers. Disabled and stopped the legacy `nomachine-remote-stt.service`, changed browser dictation to serialize text insertion, and switched the preferred insertion method from slow per-character `xdotool type` to clipboard paste with terminal-aware paste keys. Restarted `deepgram-voice-agent-gui.service` and verified the dictation WebSocket still transcribes a synthetic phrase with typing disabled.
 
