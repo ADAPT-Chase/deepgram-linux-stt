@@ -50,9 +50,24 @@ DICTATION_SAMPLE_RATE = 16_000
 DICTATION_CHANNELS = 1
 DICTATION_SAMPLE_WIDTH_BYTES = 2
 DICTATION_THRESHOLD = 280
-DICTATION_SILENCE_MS = 650
-DICTATION_MIN_SPEECH_MS = 300
-DICTATION_MAX_SEGMENT_MS = 4_000
+DICTATION_SILENCE_MS = 1_100
+DICTATION_MIN_SPEECH_MS = 120
+DICTATION_MAX_SEGMENT_MS = 6_000
+DICTATION_PRE_ROLL_MS = 500
+DEFAULT_DICTATION_KEYTERMS = (
+    "autonomous",
+    "autonomy",
+    "autonomous agent",
+    "typically",
+    "typical",
+    "TeamADAPT",
+    "Codex",
+    "NoMachine",
+    "Deepgram",
+    "Vaeris",
+    "NATS",
+    "Hermes",
+)
 TYPE_LOCK = threading.Lock()
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
@@ -1386,7 +1401,7 @@ async def ws_dictation(browser: WebSocket) -> None:
             if not speech:
                 pre_roll.append(chunk)
                 pre_roll_ms += chunk_ms
-                while pre_roll_ms > 350 and pre_roll:
+                while pre_roll_ms > DICTATION_PRE_ROLL_MS and pre_roll:
                     dropped = pre_roll.pop(0)
                     pre_roll_ms -= len(dropped) / (
                         DICTATION_SAMPLE_RATE
@@ -1423,15 +1438,17 @@ def transcribe_dictation_pcm(pcm: bytes) -> str:
     key = deepgram_key()
     if not key or not pcm:
         return ""
+    params: list[tuple[str, str]] = [
+        ("model", "nova-3"),
+        ("language", "en-US"),
+        ("smart_format", "true"),
+        ("punctuate", "true"),
+        ("dictation", "true"),
+    ]
+    params.extend(("keyterm", keyterm) for keyterm in dictation_keyterms())
     response = requests.post(
         "https://api.deepgram.com/v1/listen",
-        params={
-            "model": "nova-3",
-            "language": "en-US",
-            "smart_format": "true",
-            "punctuate": "true",
-            "dictation": "true",
-        },
+        params=params,
         headers={"Authorization": f"Token {key}", "Content-Type": "audio/wav"},
         data=pcm_to_wav_bytes(pcm),
         timeout=(3.05, 8),
@@ -1440,6 +1457,15 @@ def transcribe_dictation_pcm(pcm: bytes) -> str:
     payload = response.json()
     alternatives = payload["results"]["channels"][0]["alternatives"]
     return str(alternatives[0].get("transcript", "")).strip()
+
+
+def dictation_keyterms() -> tuple[str, ...]:
+    """Return Nova-3 keyterms for the browser dictation transcription request."""
+
+    raw = os.environ.get("VOICE_AGENT_DICTATION_KEYTERMS")
+    if raw is None:
+        return DEFAULT_DICTATION_KEYTERMS
+    return tuple(item.strip() for item in raw.split(",") if item.strip())[:100]
 
 
 def pcm_to_wav_bytes(pcm: bytes) -> bytes:

@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-05-28 05:07:10 — SIGNED_BY_AGENT
+Tuned `/dictation` for complete utterances and single-word captures. Increased silence flush to 1100 ms, lowered minimum speech duration to 120 ms, extended maximum segments to 6 seconds, increased pre-roll to 500 ms, and added Nova-3 `keyterm` prompting for Adapt/Nova vocabulary including `autonomous`. Restarted `deepgram-voice-agent-gui.service` and verified synthetic single-word transcription.
+
 ## 2026-05-28 03:11:25 — SIGNED_BY_AGENT
 Removed clipboard paste from browser dictation because it triggered Codex/browser “Failed to paste image” clipboard errors. Browser dictation now uses only serialized direct `xdotool type` with a short delay. Restarted `deepgram-voice-agent-gui.service`, confirmed the legacy NoMachine STT daemon remains disabled/inactive, and verified synthetic WebSocket transcription with typing disabled.
 

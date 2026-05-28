@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-05-28 05:07:10 — SIGNED_BY_AGENT
+Decision: Bias browser dictation toward complete utterances and key domain terms.
+Rationale: Longer silence padding and shorter minimum speech windows address clipped endings and single-word misses, while Nova-3 `keyterm` prompting improves recognition for terms such as `autonomous`.
+
 ## 2026-05-28 03:11:25 — SIGNED_BY_AGENT
 Decision: Remove clipboard paste from browser dictation.
 Rationale: Codex/browser targets treat clipboard paste as an image-capable operation and can emit missing-image clipboard errors; serialized direct typing avoids clipboard side effects.
