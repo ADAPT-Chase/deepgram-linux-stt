@@ -93,6 +93,11 @@ This path bypasses NoMachine microphone forwarding. The browser sends 16 kHz
 PCM to the server, the server transcribes through Deepgram `nova-3`, and
 recognized text is typed into the active X11 text box with `xdotool`.
 
+Spoken dictation commands:
+- `enter`, `return`, `new line`, `new paragraph`
+- `tab`
+- `question mark`, `exclamation point`, `period`, `comma`, `colon`, `semicolon`, `dash`
+
 ### Basic Controls
 
 - **Hold ALT**: Starts listening (indicator turns green)

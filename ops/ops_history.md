@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-05-28 05:13:25 — SIGNED_BY_AGENT
+Added spoken command handling to `/dictation`. The server now converts spoken `enter`, `return`, `new line`, `new paragraph`, `tab`, and punctuation commands into `xdotool` actions before typing. Added command keyterms for Deepgram Nova-3, restarted `deepgram-voice-agent-gui.service`, verified parser output for mixed commands, and documented the supported spoken commands in README.
+
 ## 2026-05-28 05:07:10 — SIGNED_BY_AGENT
 Tuned `/dictation` for complete utterances and single-word captures. Increased silence flush to 1100 ms, lowered minimum speech duration to 120 ms, extended maximum segments to 6 seconds, increased pre-roll to 500 ms, and added Nova-3 `keyterm` prompting for Adapt/Nova vocabulary including `autonomous`. Restarted `deepgram-voice-agent-gui.service` and verified synthetic single-word transcription.
 

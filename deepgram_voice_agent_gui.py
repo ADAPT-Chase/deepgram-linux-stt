@@ -67,8 +67,27 @@ DEFAULT_DICTATION_KEYTERMS = (
     "Vaeris",
     "NATS",
     "Hermes",
+    "enter",
+    "return",
+    "new line",
+    "question mark",
+    "exclamation point",
 )
 TYPE_LOCK = threading.Lock()
+DICTATION_KEY_MARKER = "\uE000KEY_{key}\uE000"
+DICTATION_COMMAND_REPLACEMENTS = (
+    (r"\bnew paragraph\b", DICTATION_KEY_MARKER.format(key="Return") * 2),
+    (r"\b(?:new line|newline|next line)\b", DICTATION_KEY_MARKER.format(key="Return")),
+    (r"\b(?:enter|return)\b", DICTATION_KEY_MARKER.format(key="Return")),
+    (r"\btab\b", DICTATION_KEY_MARKER.format(key="Tab")),
+    (r"\bquestion mark\b", "?"),
+    (r"\b(?:exclamation point|exclamation mark|exclamation)\b", "!"),
+    (r"\b(?:period|full stop)\b", "."),
+    (r"\bcomma\b", ","),
+    (r"\bcolon\b", ":"),
+    (r"\bsemicolon\b", ";"),
+    (r"\b(?:dash|hyphen)\b", "-"),
+)
 
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
 ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$")
@@ -1489,13 +1508,76 @@ def type_dictation_text(text: str) -> None:
         "XAUTHORITY": os.environ.get("XAUTHORITY", "/home/x/.Xauthority"),
     }
     with TYPE_LOCK:
-        subprocess.run(
-            ["xdotool", "type", "--clearmodifiers", "--delay", "2", f"{text} "],
-            check=False,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        for action, value in dictation_actions(text):
+            if action == "key":
+                subprocess.run(
+                    ["xdotool", "key", "--clearmodifiers", value],
+                    check=False,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            elif value:
+                subprocess.run(
+                    ["xdotool", "type", "--clearmodifiers", "--delay", "2", value],
+                    check=False,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+
+def dictation_actions(text: str) -> list[tuple[str, str]]:
+    """Convert spoken punctuation and key commands into xdotool actions."""
+
+    rendered = f" {text.strip()} "
+    for pattern, replacement in DICTATION_COMMAND_REPLACEMENTS:
+        rendered = re.sub(pattern, f" {replacement} ", rendered, flags=re.IGNORECASE)
+    rendered = normalize_spoken_punctuation(rendered)
+
+    actions: list[tuple[str, str]] = []
+    marker_re = re.compile(r"\uE000KEY_([A-Za-z0-9_+-]+)\uE000")
+    cursor = 0
+    for match in marker_re.finditer(rendered):
+        add_text_action(actions, rendered[cursor : match.start()])
+        actions.append(("key", match.group(1)))
+        cursor = match.end()
+    add_text_action(actions, rendered[cursor:])
+    add_trailing_space(actions)
+    return actions
+
+
+def normalize_spoken_punctuation(text: str) -> str:
+    """Normalize spaces around punctuation introduced by spoken commands."""
+
+    normalized = re.sub(r"\s+", " ", text).strip()
+    normalized = re.sub(r"\s+([,.;:?!])", r"\1", normalized)
+    normalized = re.sub(r"([({\[])\s+", r"\1", normalized)
+    normalized = re.sub(r"\s+([)}\]])", r"\1", normalized)
+    normalized = re.sub(r"\s*-\s*", "-", normalized)
+    return normalized
+
+
+def add_text_action(actions: list[tuple[str, str]], text: str) -> None:
+    """Append non-empty text to an action list, coalescing adjacent text actions."""
+
+    value = text.strip()
+    if not value:
+        return
+    if actions and actions[-1][0] == "text":
+        actions[-1] = ("text", f"{actions[-1][1]} {value}")
+        return
+    actions.append(("text", value))
+
+
+def add_trailing_space(actions: list[tuple[str, str]]) -> None:
+    """Preserve dictation spacing after final text chunks."""
+
+    if not actions or actions[-1][0] != "text":
+        return
+    value = actions[-1][1]
+    if not value.endswith(" "):
+        actions[-1] = ("text", f"{value} ")
 
 
 async def _browser_to_deepgram(browser: WebSocket, upstream: Any) -> None:

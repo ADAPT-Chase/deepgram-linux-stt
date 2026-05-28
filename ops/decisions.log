@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-05-28 05:13:25 — SIGNED_BY_AGENT
+Decision: Translate spoken editing and punctuation commands in the server-side dictation typer.
+Rationale: Running command conversion after transcription but before `xdotool` insertion makes it deterministic and works across terminals, browser text boxes, and editors in the X11 session.
+
 ## 2026-05-28 05:07:10 — SIGNED_BY_AGENT
 Decision: Bias browser dictation toward complete utterances and key domain terms.
 Rationale: Longer silence padding and shorter minimum speech windows address clipped endings and single-word misses, while Nova-3 `keyterm` prompting improves recognition for terms such as `autonomous`.
