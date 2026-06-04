@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import audioop
 import os
 import io
 import re
@@ -14,12 +13,20 @@ import threading
 import time
 import tkinter as tk
 import tempfile
+import warnings
 import wave
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+warnings.filterwarnings(
+    "ignore",
+    message="'audioop' is deprecated and slated for removal in Python 3.13",
+    category=DeprecationWarning,
+)
+import audioop
 
 signal.signal(signal.SIGUSR1, signal.SIG_IGN)
 
@@ -47,6 +54,14 @@ KEY_COMMANDS = {
     "next line": ("key", "Return"),
     "new paragraph": ("key", "Return", "Return"),
     "tab": ("key", "Tab"),
+}
+READBACK_COMMANDS = {
+    "read back selection",
+    "read selection",
+    "read selected text",
+    "read highlighted text",
+    "read this",
+    "read it back",
 }
 SPOKEN_PUNCTUATION = (
     (r"\bquestion mark\b", "?"),
@@ -647,6 +662,8 @@ def type_transcript(transcript: str) -> None:
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                     )
+            elif action[0] == "readback":
+                threading.Thread(target=read_selected_text, daemon=True).start()
             elif action[0] == "text" and action[1]:
                 subprocess.run(
                     ["xdotool", "type", "--clearmodifiers", "--delay", "10", action[1]],
@@ -668,6 +685,9 @@ def transcript_actions(transcript: str) -> list[tuple[str, ...]]:
         command = command.removeprefix("voice ").strip()
     elif command.startswith("wish "):
         command = command.removeprefix("wish ").strip()
+
+    if command in READBACK_COMMANDS:
+        return [("readback",)]
 
     action = KEY_COMMANDS.get(command)
     if action is not None:

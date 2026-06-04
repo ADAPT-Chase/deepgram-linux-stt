@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-06-04 06:08:03 — Veyra, CommsOps - Tier 1 lead
+Decision: Treat selected-text readback as an exact spoken command in the local NoMachine dictation parser.
+Rationale: Readback should be hands-free while remoted in through NoMachine, but it must not trigger from ordinary prose. Keeping readback as a full-segment command matches the safety model already used for `enter`, `return`, and `tab`.
+
 ## 2026-06-04 04:02:24 — Veyra, CommsOps - Tier 1 lead
 Decision: Require full-segment matching for NoMachine dictation navigation keys while allowing inline spoken punctuation.
 Rationale: `enter` and `return` should control the editor when spoken as commands, but normal phrases containing those words must remain text to avoid accidental line breaks during dictation.

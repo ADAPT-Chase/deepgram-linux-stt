@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-06-04 06:08:03 — Veyra, CommsOps - Tier 1 lead
+Added spoken readback controls to the NoMachine local dictation path. `read back selection`, `read selection`, `read selected text`, `read highlighted text`, `read this`, and `read it back` now invoke the same selected-text readback behavior as `Ctrl+Shift+Space` / `remote-stt-read`. The existing `voice` and `wish` command prefixes apply to readback and navigation commands while normal dictation phrases remain text. Added parser regression tests and suppressed the restart-only Python `audioop` deprecation warning.
+
 ## 2026-06-04 04:02:24 — Veyra, CommsOps - Tier 1 lead
 Locked down local NoMachine dictation command handling. Added standalone spoken key commands for `enter`, `return`, `new line`, `next line`, `new paragraph`, and `tab`, with optional `voice`/`wish` prefixes. Inline spoken punctuation now works for `question mark`, `comma`, `period`, `colon`, `semicolon`, `dash`, and `exclamation point`. Verified parser output without typing into the desktop, restarted `nomachine-remote-stt.service` muted, and documented the local controls/readback path in `README.md`.
 
