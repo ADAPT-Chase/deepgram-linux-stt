@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-06-04 07:58:00 — Veyra, CommsOps - Tier 1 lead
+Unmuted the running NoMachine local dictation daemon through its supported `SIGUSR1` toggle path after final verification showed the service processes were active but `/run/user/1000/remote-stt.state` still contained `muted`. Confirmed the state file returned to `on` and both `remote_faster_whisper_stt.py` plus `deepgram_voice_agent_gui.py` remained running.
+
 ## 2026-06-04 07:35:41 — Veyra, CommsOps - Tier 1 lead
 Hardened local NoMachine dictation controls after live transcription proved usable again. Added real-world STT variants for `voice command`, `wish command`, `press enter`, `press return`, `line break`, `press tab`, `read back the selection`, `readback selection`, and misheard `re read back selection`, while keeping full-segment matching so ordinary prose still types normally. Aligned the installed and tracked `nomachine-remote-stt.service` defaults to typing on and debug skip logging off, cleared the runtime mute state, restarted the user service, and verified the live log started with `typing=on` and captured a fresh transcript row.
 

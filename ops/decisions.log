@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-06-04 07:58:00 — Veyra, CommsOps - Tier 1 lead
+Decision: Use the daemon's own signal toggle to restore typing state instead of editing `/run/user/1000/remote-stt.state` directly.
+Rationale: `SIGUSR1` exercises the same runtime path as the operator toggle and keeps the state transition consistent with the daemon's internal enabled flag.
+
 ## 2026-06-04 07:35:41 — Veyra, CommsOps - Tier 1 lead
 Decision: Keep local dictation command handling conservative but recognition-tolerant, and make NoMachine STT restart into typing-on with quiet logs.
 Rationale: The operator is actively using NoMachine dictation, so `wish` must behave as the same wake prefix as `voice` for navigation/readback commands. Those commands still need exact full-segment matching to avoid accidental keypresses from prose. The service state was stuck muted and debug logging was flooding skip messages, so defaulting the unit to typing-on and disabling skip debug makes the working path durable.
