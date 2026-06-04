@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-06-04 09:06:00 — Veyra, CommsOps - Tier 1 lead
+Locked down the live NoMachine dictation grammar after operator validation. Confirmed regression coverage for `wish`/`voice` prefix parity, standalone `enter`/`return`/`next line` Return-key commands, exact selected-text readback commands, and ordinary prose containing `enter` or `return`. Restored the daemon runtime state to `on` after the last `Ctrl+Space` mute event and hardened `remote-stt-toggle` with plain-terminal D-Bus defaults plus deterministic `on` / `off` modes.
+
 ## 2026-06-04 08:26:12 — Veyra, CommsOps - Tier 1 lead
 Validated and locked down the active NoMachine local dictation controls after live transcription stabilized. Confirmed `Ctrl+Shift+Space` readback, `wish`/`voice` prefix parity, standalone `enter`/`return`/`next line` key commands, and the misheard `re read back selection` path are covered by regression tests. Restored the live daemon state to `on` through `remote_stt_toggle_typing.sh` after finding it muted.
 

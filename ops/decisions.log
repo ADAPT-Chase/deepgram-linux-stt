@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-06-04 09:06:00 — Veyra, CommsOps - Tier 1 lead
+Decision: Keep `wish` as a durable synonym for `voice` in local dictation commands and harden the toggle helper for terminals without inherited D-Bus environment variables.
+Rationale: The operator wants `wish return` / `wish next line` as reliable hands-free controls, while local shell access should be able to pause or resume dictation without manually exporting `XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS`. Deterministic `remote-stt-toggle on` and `remote-stt-toggle off` avoid ambiguity from the daemon's hotkey debounce.
+
 ## 2026-06-04 08:26:12 — Veyra, CommsOps - Tier 1 lead
 Decision: Treat `wish` as the durable spoken control prefix for local dictation, equivalent to `voice`, while keeping all navigation/readback controls exact-match only.
 Rationale: The operator wants hands-free control phrases such as `wish return` and `wish next line`, but prose containing `enter` or `return` must continue to type as text instead of firing unintended keypresses.
