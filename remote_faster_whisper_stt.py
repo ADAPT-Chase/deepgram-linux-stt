@@ -55,6 +55,9 @@ KEY_COMMANDS = {
     "newline": ("key", "Return"),
     "next line": ("key", "Return"),
     "line break": ("key", "Return"),
+    "enter for next line": ("key", "Return"),
+    "return for next line": ("key", "Return"),
+    "go to next line": ("key", "Return"),
     "new paragraph": ("key", "Return", "Return"),
     "tab": ("key", "Tab"),
     "press tab": ("key", "Tab"),
@@ -90,6 +93,34 @@ SPOKEN_PUNCTUATION = (
     (r"\bcolon\b", ":"),
     (r"\bsemicolon\b", ";"),
     (r"\b(?:dash|hyphen)\b", "-"),
+)
+DEFAULT_DEEPGRAM_KEYTERMS = (
+    "TeamADAPT",
+    "Codex",
+    "NoMachine",
+    "Deepgram",
+    "NATS",
+    "Hermes",
+    "enter",
+    "return",
+    "press enter",
+    "press return",
+    "new line",
+    "newline",
+    "next line",
+    "line break",
+    "new paragraph",
+    "tab",
+    "press tab",
+    "voice",
+    "voice command",
+    "wish",
+    "wish command",
+    "read back selection",
+    "read back the selection",
+    "readback selection",
+    "read selected text",
+    "selected text",
 )
 
 
@@ -572,15 +603,16 @@ def transcribe_with_deepgram(pcm: bytes, config: SttConfig) -> str:
 
     wav_bytes = pcm_to_wav_bytes(pcm)
     url = "https://api.deepgram.com/v1/listen"
-    params = {
-        "model": config.deepgram_model,
-        "language": "en-US",
-        "smart_format": "true",
-        "punctuate": "true",
-        "dictation": "true",
-        "paragraphs": "false",
-        "utterances": "false",
-    }
+    params: list[tuple[str, str]] = [
+        ("model", config.deepgram_model),
+        ("language", "en-US"),
+        ("smart_format", "true"),
+        ("punctuate", "true"),
+        ("dictation", "true"),
+        ("paragraphs", "false"),
+        ("utterances", "false"),
+    ]
+    params.extend(("keyterm", keyterm) for keyterm in deepgram_keyterms())
     headers = {"Content-Type": "audio/wav"}
 
     for key_env in config.deepgram_key_envs:
@@ -637,6 +669,15 @@ def transcribe_with_deepgram(pcm: bytes, config: SttConfig) -> str:
             return ""
 
     return ""
+
+
+def deepgram_keyterms() -> tuple[str, ...]:
+    """Return keyterms that bias Deepgram toward local dictation commands."""
+
+    raw = os.getenv("REMOTE_STT_DEEPGRAM_KEYTERMS")
+    if raw is None:
+        return DEFAULT_DEEPGRAM_KEYTERMS
+    return tuple(item.strip() for item in raw.split(",") if item.strip())[:100]
 
 
 def pcm_to_wav_bytes(pcm: bytes) -> bytes:

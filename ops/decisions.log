@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-06-04 09:27:33 — Veyra, CommsOps - Tier 1 lead
+Decision: Treat `wish` and `voice` as durable equivalent control words and bias Deepgram toward the exact local command vocabulary.
+Rationale: The operator is dictating through NoMachine and needs short hands-free controls to survive realistic STT variants. Keyterm biasing improves recognition, while exact full-segment command matching still prevents ordinary prose such as `I would like to return later` from pressing Return.
+
 ## 2026-06-04 09:06:00 — Veyra, CommsOps - Tier 1 lead
 Decision: Keep `wish` as a durable synonym for `voice` in local dictation commands and harden the toggle helper for terminals without inherited D-Bus environment variables.
 Rationale: The operator wants `wish return` / `wish next line` as reliable hands-free controls, while local shell access should be able to pause or resume dictation without manually exporting `XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS`. Deterministic `remote-stt-toggle on` and `remote-stt-toggle off` avoid ambiguity from the daemon's hotkey debounce.
