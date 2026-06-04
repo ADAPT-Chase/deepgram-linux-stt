@@ -39,6 +39,9 @@ class TestRemoteSttCommands(unittest.TestCase):
         self.assertEqual(transcript_actions("wish return"), [("key", "Return")])
         self.assertEqual(transcript_actions("wish next line"), [("key", "Return")])
         self.assertEqual(transcript_actions("wish line break"), [("key", "Return")])
+        self.assertEqual(transcript_actions("return for next line"), [("key", "Return")])
+        self.assertEqual(transcript_actions("wish return for next line"), [("key", "Return")])
+        self.assertEqual(transcript_actions("voice go to next line"), [("key", "Return")])
         self.assertEqual(
             transcript_actions("I would like to enter the room"),
             [("text", "I would like to enter the room ")],
@@ -89,6 +92,18 @@ class TestBrowserDictationCommands(unittest.TestCase):
         )
         self.assertEqual(
             browser_dictation.dictation_actions("wish next line"),
+            [("key", "Return")],
+        )
+        self.assertEqual(
+            browser_dictation.dictation_actions("return for next line"),
+            [("key", "Return")],
+        )
+        self.assertEqual(
+            browser_dictation.dictation_actions("wish return for next line"),
+            [("key", "Return")],
+        )
+        self.assertEqual(
+            browser_dictation.dictation_actions("voice go to next line"),
             [("key", "Return")],
         )
         self.assertEqual(
