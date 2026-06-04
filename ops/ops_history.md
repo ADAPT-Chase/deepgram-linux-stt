@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-06-04 06:35:37 — Veyra, CommsOps - Tier 1 lead
+Locked down NoMachine dictation command regressions for `wish`/`voice` parity. Added explicit coverage for `wish return`, `wish next line`, and ordinary prose containing `return` so spoken navigation remains command-only while normal dictation remains text.
+
 ## 2026-06-04 06:08:03 — Veyra, CommsOps - Tier 1 lead
 Added spoken readback controls to the NoMachine local dictation path. `read back selection`, `read selection`, `read selected text`, `read highlighted text`, `read this`, and `read it back` now invoke the same selected-text readback behavior as `Ctrl+Shift+Space` / `remote-stt-read`. The existing `voice` and `wish` command prefixes apply to readback and navigation commands while normal dictation phrases remain text. Added parser regression tests and suppressed the restart-only Python `audioop` deprecation warning.
 

@@ -24,9 +24,16 @@ class TestRemoteSttCommands(unittest.TestCase):
         self.assertEqual(transcript_actions("new line"), [("key", "Return")])
         self.assertEqual(transcript_actions("voice enter"), [("key", "Return")])
         self.assertEqual(transcript_actions("wish enter"), [("key", "Return")])
+        self.assertEqual(transcript_actions("voice return"), [("key", "Return")])
+        self.assertEqual(transcript_actions("wish return"), [("key", "Return")])
+        self.assertEqual(transcript_actions("wish next line"), [("key", "Return")])
         self.assertEqual(
             transcript_actions("I would like to enter the room"),
             [("text", "I would like to enter the room ")],
+        )
+        self.assertEqual(
+            transcript_actions("I would like to return later"),
+            [("text", "I would like to return later ")],
         )
 
     def test_readback_commands_are_exact(self):
