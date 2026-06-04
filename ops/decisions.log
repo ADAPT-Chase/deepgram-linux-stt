@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-06-04 03:58:11 — Veyra, CommsOps - Tier 1 lead
+Decision: Treat NoMachine dictation mute as a hard pause, not just a typing suppression switch.
+Rationale: The NoMachine microphone can carry background room audio; skipping transcription while muted prevents accidental text floods, reduces API usage, and makes Ctrl+Space a reliable pause/resume control.
+
 ## 2026-06-04 03:53:01 — Veyra, CommsOps - Tier 1 lead
 Decision: Restore NoMachine local dictation as a lightweight Deepgram-only daemon instead of the prior Deepgram plus local Whisper fallback path.
 Rationale: The operator wants local desktop dictation while remoted in through NoMachine; lazy-loading Whisper and disabling fallback keeps the service around 35 MB at startup while preserving `xdotool` insertion into the active X11 session.

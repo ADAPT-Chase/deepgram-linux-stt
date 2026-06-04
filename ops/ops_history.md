@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-06-04 03:58:11 — Veyra, CommsOps - Tier 1 lead
+Stabilized NoMachine local dictation pause behavior. Muted mode now skips completed audio segments before Deepgram transcription and before text insertion, preventing background audio from generating transcripts or consuming provider calls while paused. Added a 750 ms debounce to Ctrl+Space and SIGUSR1 toggles to prevent repeated hotkey events from flipping state multiple times. Restarted `nomachine-remote-stt.service` muted and verified logs show muted segments being skipped.
+
 ## 2026-06-04 03:53:01 — Veyra, CommsOps - Tier 1 lead
 Restored local NoMachine dictation through `nomachine-remote-stt.service`. The installed user service now matches the tracked Deepgram-only path with no local Whisper fallback, active GDM Xauthority for `xdotool`, typing enabled by default, and tuned segmentation for low-latency desktop dictation. Restarted and enabled the service; live status showed active capture from `nx_client_mic`, about 35 MB startup memory, and successful live transcript segments. Added PATH helpers `remote-stt-toggle` and `remote-stt-read`.
 

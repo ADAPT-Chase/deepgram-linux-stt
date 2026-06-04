@@ -122,6 +122,7 @@ class HotkeyController:
         self._readback_enabled = readback_enabled
         self._lock = threading.Lock()
         self._pressed: set[keyboard.Key | keyboard.KeyCode] = set()
+        self._last_toggle_at = 0.0
         self._enabled = self._read_state(default=enabled)
         self._write_state(self._enabled)
 
@@ -135,6 +136,10 @@ class HotkeyController:
         """Toggle text injection and return the new state."""
 
         with self._lock:
+            now = time.monotonic()
+            if now - self._last_toggle_at < 0.75:
+                return self._enabled
+            self._last_toggle_at = now
             self._enabled = not self._enabled
             enabled = self._enabled
 
@@ -158,6 +163,12 @@ class HotkeyController:
                 readback = self._readback_enabled
                 enabled = None
             elif ctrl_down and not shift_down and key == keyboard.Key.space:
+                now = time.monotonic()
+                if now - self._last_toggle_at < 0.75:
+                    enabled = None
+                    readback = False
+                    return
+                self._last_toggle_at = now
                 self._enabled = not self._enabled
                 enabled = self._enabled
                 readback = False
@@ -727,6 +738,15 @@ def main() -> int:
                 speech_chunks = 0
                 silence_chunks = 0
                 peak_rms = 0
+
+                if not hotkey_controller.enabled():
+                    if config.debug:
+                        print(
+                            "Remote STT muted segment skipped "
+                            f"audio_ms={audio_ms:.0f} peak_rms={segment_peak_rms}",
+                            flush=True,
+                        )
+                    continue
 
                 transcript = transcribe_audio(model, pcm, config)
                 if config.debug:
