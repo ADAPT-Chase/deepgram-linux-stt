@@ -107,10 +107,12 @@ cleanup path. The systemd unit gives the cleanup route a 15-second read timeout
 and falls back to the raw transcript if the provider is slow or unavailable.
 
 Spoken dictation commands:
-- `enter`, `return`, `new line`, `new paragraph`
+- `enter`, `return`, `new line`, `next line`, `return for next line`, `new paragraph`
 - `tab`
+- Optional control prefixes `voice`, `wish`, `voice command`, and `wish command`
 - `mute`, `mute on`, `typing off`
 - `unmute`, `mute off`, `typing on`
+- `read back selection`, `read selected text`, `re read back selection`
 - `question mark`, `exclamation point`, `period`, `comma`, `colon`, `semicolon`, `dash`
 
 ### NoMachine Local Dictation
@@ -128,11 +130,12 @@ to Deepgram. This prevents background audio from creating transcripts while the
 operator is paused.
 
 Local NoMachine spoken commands:
-- Say `enter`, `return`, `new line`, `next line`, `new paragraph`, or `tab` as a
+- Say `enter`, `return`, `new line`, `next line`, `return for next line`,
+  `enter for next line`, `go to next line`, `new paragraph`, or `tab` as a
   standalone segment to send the matching key.
 - Optional prefixes `voice`, `wish`, `voice command`, and `wish command` are
   accepted, for example `wish enter`, `wish return`, `wish next line`, and
-  `voice command return`.
+  `voice command return`. `wish` and `voice` are equivalent control words.
 - Say `read back selection`, `read selection`, `read selected text`, or
   `read highlighted text` as a standalone segment to read highlighted text aloud.
   The parser also accepts the common STT variant `re read back selection`.

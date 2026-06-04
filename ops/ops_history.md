@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-06-04 09:27:33 — Veyra, CommsOps - Tier 1 lead
+Locked down the local dictation control grammar after live operator validation. Added Deepgram keyterm biasing for `wish`, `voice`, selected-text readback, and spoken navigation phrases; added `enter for next line`, `return for next line`, and `go to next line` as exact Return-key commands in both the browser dictation path and NoMachine daemon path. Verified parser regressions with X11 environment, restarted `deepgram-voice-agent-gui.service` and `nomachine-remote-stt.service`, restored NoMachine typing state to `on`, and confirmed `/api/health` remained OK.
+
 ## 2026-06-04 09:06:00 — Veyra, CommsOps - Tier 1 lead
 Locked down the live NoMachine dictation grammar after operator validation. Confirmed regression coverage for `wish`/`voice` prefix parity, standalone `enter`/`return`/`next line` Return-key commands, exact selected-text readback commands, and ordinary prose containing `enter` or `return`. Restored the daemon runtime state to `on` after the last `Ctrl+Space` mute event and hardened `remote-stt-toggle` with plain-terminal D-Bus defaults plus deterministic `on` / `off` modes.
 
