@@ -1,5 +1,11 @@
 # Ops History
 
+## 2026-06-04 03:30:16 — Veyra, CommsOps - Tier 1 lead
+Restarted `deepgram-voice-agent-gui.service` with dictation polish disabled. Verified the live process environment reports `VOICE_AGENT_DICTATION_POLISH=0` and `VOICE_AGENT_DICTATION_POLISH_READ_TIMEOUT=2`. Ran a muted synthetic `/ws/dictate` WebSocket test with generated speech; Deepgram returned "Testing dictation latency" and the route completed in 622 ms without typing into the active desktop window.
+
+## 2026-06-04 03:29:05 — Veyra, CommsOps - Tier 1 lead
+Disabled the browser dictation LLM polish pass in the installed user service and tracked systemd template. Reduced the polish read timeout from 15 seconds to 2 seconds as a guard if polish is re-enabled later. This keeps `/dictation` on Deepgram Nova-3 raw typing and removes the post-transcription stall that matched the observed lag.
+
 ## 2026-05-28 06:42:23 — sable
 Investigated voice-agent no-audio playback. A direct WebSocket smoke test using the current Deepgram `InjectUserMessage` format returned assistant text plus 38 PCM audio frames / 36480 bytes, so the backend Voice Agent + TTS path is functional. Fixed the GUI typed-turn payload, added a Test Sound button, added audio frame/byte logging on `AgentAudioDone`, added Blob-to-ArrayBuffer fallback, increased playback gain, restarted `deepgram-voice-agent-gui.service`, and verified the public page serves the updated client.
 

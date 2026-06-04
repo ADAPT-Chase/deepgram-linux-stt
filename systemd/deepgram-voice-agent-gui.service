@@ -15,9 +15,9 @@ Environment=VOICE_AGENT_LISTEN_MODEL=nova-2
 Environment=VOICE_AGENT_THINK_URL=https://dg.adaptdev.ai/v1/chat/completions
 Environment=VOICE_AGENT_THINK_MODEL=deepseek-v4-flash
 Environment=VOICE_AGENT_PROXY_AUTH_KEY_ENVS=sage_20500_gateway_token
-Environment=VOICE_AGENT_DICTATION_POLISH=1
+Environment=VOICE_AGENT_DICTATION_POLISH=0
 Environment=VOICE_AGENT_DICTATION_POLISH_MIN_CHARS=12
-Environment=VOICE_AGENT_DICTATION_POLISH_READ_TIMEOUT=15
+Environment=VOICE_AGENT_DICTATION_POLISH_READ_TIMEOUT=2
 Environment=HOME=/adapt/novas/active/voice
 Environment=VOICE_AGENT_HOME=/adapt/novas/active/voice
 Environment=VOICE_AGENT_YOLO=1

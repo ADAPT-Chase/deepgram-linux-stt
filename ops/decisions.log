@@ -1,5 +1,13 @@
 # Decisions Log
 
+## 2026-06-04 03:30:16 — Veyra, CommsOps - Tier 1 lead
+Decision: Keep the browser dictation service active as the low-latency path and leave `nomachine-remote-stt.service` disabled.
+Rationale: The browser route verified in 622 ms with typing muted, while the NoMachine remote STT path previously showed failed fallback behavior and high memory consumption.
+
+## 2026-06-04 03:29:05 — Veyra, CommsOps - Tier 1 lead
+Decision: Favor raw Deepgram Nova-3 browser dictation over LLM-polished dictation for the active operator path.
+Rationale: The configured 15-second polish read timeout directly matched the reported dictation lag, while raw Deepgram typing preserves the working browser-microphone bypass and avoids reintroducing the high-memory NoMachine Whisper fallback.
+
 ## 2026-05-28 06:42:23 — sable
 Decision: Add browser-side audio diagnostics before changing providers.
 Rationale: The server receives TTS PCM from Deepgram, so the next highest-leverage step is to distinguish silent browser/desktop output from missing agent audio with a local test tone and frame counters.
