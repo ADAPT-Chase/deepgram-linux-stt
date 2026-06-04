@@ -49,20 +49,39 @@ TYPE_LOCK = threading.Lock()
 KEY_COMMANDS = {
     "enter": ("key", "Return"),
     "return": ("key", "Return"),
+    "press enter": ("key", "Return"),
+    "press return": ("key", "Return"),
     "new line": ("key", "Return"),
     "newline": ("key", "Return"),
     "next line": ("key", "Return"),
+    "line break": ("key", "Return"),
     "new paragraph": ("key", "Return", "Return"),
     "tab": ("key", "Tab"),
+    "press tab": ("key", "Tab"),
 }
 READBACK_COMMANDS = {
     "read back selection",
+    "read back selected",
+    "read back selected text",
+    "read back the selection",
+    "readback selection",
     "read selection",
+    "read selection back",
     "read selected text",
     "read highlighted text",
+    "read back highlighted text",
+    "re read back selection",
+    "reread back selection",
+    "reread selection",
     "read this",
     "read it back",
 }
+COMMAND_PREFIXES = (
+    "voice command ",
+    "wish command ",
+    "voice ",
+    "wish ",
+)
 SPOKEN_PUNCTUATION = (
     (r"\bquestion mark\b", "?"),
     (r"\b(?:exclamation point|exclamation mark|exclamation)\b", "!"),
@@ -680,11 +699,7 @@ def transcript_actions(transcript: str) -> list[tuple[str, ...]]:
     avoids pressing Return when ordinary dictation contains words like "enter".
     """
 
-    command = normalized_command(transcript)
-    if command.startswith("voice "):
-        command = command.removeprefix("voice ").strip()
-    elif command.startswith("wish "):
-        command = command.removeprefix("wish ").strip()
+    command = command_body(transcript)
 
     if command in READBACK_COMMANDS:
         return [("readback",)]
@@ -705,6 +720,16 @@ def normalized_command(text: str) -> str:
     command = text.strip().lower()
     command = re.sub(r"[.!?]+$", "", command)
     command = re.sub(r"\s+", " ", command)
+    return command
+
+
+def command_body(text: str) -> str:
+    """Return normalized command text after supported wake-word prefixes."""
+
+    command = normalized_command(text)
+    for prefix in COMMAND_PREFIXES:
+        if command.startswith(prefix):
+            return command.removeprefix(prefix).strip()
     return command
 
 

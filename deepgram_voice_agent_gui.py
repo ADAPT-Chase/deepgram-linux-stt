@@ -98,20 +98,39 @@ DICTATION_KEY_MARKER = "\uE000KEY_{key}\uE000"
 DICTATION_KEY_COMMANDS = {
     "enter": ("key", "Return"),
     "return": ("key", "Return"),
+    "press enter": ("key", "Return"),
+    "press return": ("key", "Return"),
     "new line": ("key", "Return"),
     "newline": ("key", "Return"),
     "next line": ("key", "Return"),
+    "line break": ("key", "Return"),
     "new paragraph": ("key", "Return", "Return"),
     "tab": ("key", "Tab"),
+    "press tab": ("key", "Tab"),
 }
 DICTATION_READBACK_COMMANDS = {
     "read back selection",
+    "read back selected",
+    "read back selected text",
+    "read back the selection",
+    "readback selection",
     "read selection",
+    "read selection back",
     "read selected text",
     "read highlighted text",
+    "read back highlighted text",
+    "re read back selection",
+    "reread back selection",
+    "reread selection",
     "read this",
     "read it back",
 }
+DICTATION_COMMAND_PREFIXES = (
+    "voice command ",
+    "wish command ",
+    "voice ",
+    "wish ",
+)
 DICTATION_PUNCTUATION_REPLACEMENTS = (
     (r"\bquestion mark\b", "?"),
     (r"\b(?:exclamation point|exclamation mark|exclamation)\b", "!"),
@@ -1605,11 +1624,7 @@ def read_selected_text() -> None:
 def dictation_actions(text: str) -> list[tuple[str, str]]:
     """Convert spoken punctuation and key commands into xdotool actions."""
 
-    command = normalized_dictation_command(text)
-    if command.startswith("voice "):
-        command = command.removeprefix("voice ").strip()
-    elif command.startswith("wish "):
-        command = command.removeprefix("wish ").strip()
+    command = dictation_command_body(text)
 
     if command in DICTATION_READBACK_COMMANDS:
         return [("readback", "")]
@@ -1644,14 +1659,20 @@ def normalized_dictation_command(text: str) -> str:
     return command
 
 
+def dictation_command_body(text: str) -> str:
+    """Return normalized command text after supported wake-word prefixes."""
+
+    command = normalized_dictation_command(text)
+    for prefix in DICTATION_COMMAND_PREFIXES:
+        if command.startswith(prefix):
+            return command.removeprefix(prefix).strip()
+    return command
+
+
 def is_dictation_control_command(text: str) -> bool:
     """Return true when the transcript is an exact non-text dictation command."""
 
-    command = normalized_dictation_command(text)
-    if command.startswith("voice "):
-        command = command.removeprefix("voice ").strip()
-    elif command.startswith("wish "):
-        command = command.removeprefix("wish ").strip()
+    command = dictation_command_body(text)
     return command in DICTATION_KEY_COMMANDS or command in DICTATION_READBACK_COMMANDS
 
 

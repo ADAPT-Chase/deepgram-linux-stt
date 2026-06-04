@@ -32,9 +32,13 @@ class TestRemoteSttCommands(unittest.TestCase):
         self.assertEqual(transcript_actions("new line"), [("key", "Return")])
         self.assertEqual(transcript_actions("voice enter"), [("key", "Return")])
         self.assertEqual(transcript_actions("wish enter"), [("key", "Return")])
+        self.assertEqual(transcript_actions("voice command enter"), [("key", "Return")])
+        self.assertEqual(transcript_actions("wish command return"), [("key", "Return")])
+        self.assertEqual(transcript_actions("press enter"), [("key", "Return")])
         self.assertEqual(transcript_actions("voice return"), [("key", "Return")])
         self.assertEqual(transcript_actions("wish return"), [("key", "Return")])
         self.assertEqual(transcript_actions("wish next line"), [("key", "Return")])
+        self.assertEqual(transcript_actions("wish line break"), [("key", "Return")])
         self.assertEqual(
             transcript_actions("I would like to enter the room"),
             [("text", "I would like to enter the room ")],
@@ -47,7 +51,10 @@ class TestRemoteSttCommands(unittest.TestCase):
     def test_readback_commands_are_exact(self):
         self.assertEqual(transcript_actions("read back selection"), [("readback",)])
         self.assertEqual(transcript_actions("voice read back selection"), [("readback",)])
+        self.assertEqual(transcript_actions("wish command read back selection"), [("readback",)])
         self.assertEqual(transcript_actions("wish read selected text"), [("readback",)])
+        self.assertEqual(transcript_actions("read back the selection"), [("readback",)])
+        self.assertEqual(transcript_actions("re read back selection"), [("readback",)])
         self.assertEqual(
             transcript_actions("please read back selection when ready"),
             [("text", "please read back selection when ready ")],
@@ -73,6 +80,14 @@ class TestBrowserDictationCommands(unittest.TestCase):
         self.assertEqual(browser_dictation.dictation_actions("voice enter"), [("key", "Return")])
         self.assertEqual(browser_dictation.dictation_actions("wish return"), [("key", "Return")])
         self.assertEqual(
+            browser_dictation.dictation_actions("voice command enter"),
+            [("key", "Return")],
+        )
+        self.assertEqual(
+            browser_dictation.dictation_actions("wish line break"),
+            [("key", "Return")],
+        )
+        self.assertEqual(
             browser_dictation.dictation_actions("wish next line"),
             [("key", "Return")],
         )
@@ -84,6 +99,10 @@ class TestBrowserDictationCommands(unittest.TestCase):
     def test_readback_commands_are_exact(self):
         self.assertEqual(
             browser_dictation.dictation_actions("wish read back selection"),
+            [("readback", "")],
+        )
+        self.assertEqual(
+            browser_dictation.dictation_actions("re read back selection"),
             [("readback", "")],
         )
         self.assertEqual(

@@ -25,14 +25,14 @@ Environment=REMOTE_STT_BEAM_SIZE=1
 Environment=REMOTE_STT_VAD_FILTER=1
 Environment=REMOTE_STT_CONDITION_PREVIOUS=0
 Environment=REMOTE_STT_NO_SPEECH_THRESHOLD=0.6
-Environment=REMOTE_STT_TYPE_TEXT=0
+Environment=REMOTE_STT_TYPE_TEXT=1
 Environment=REMOTE_STT_HOTKEY=ctrl+space
 Environment=REMOTE_STT_STATE=/run/user/1000/remote-stt.state
 Environment=REMOTE_STT_READBACK=1
 Environment=REMOTE_STT_READBACK_MAX_CHARS=1200
 Environment=REMOTE_STT_TTS_CMD=/data/vast/home/x/.hermes/hermes-agent/venv/bin/edge-tts
 Environment=REMOTE_STT_TTS_VOICE=en-US-AvaMultilingualNeural
-Environment=REMOTE_STT_DEBUG=1
+Environment=REMOTE_STT_DEBUG=0
 ExecStart=/adapt/projects/stt/run_nomachine_remote_stt.sh
 Restart=always
 RestartSec=2
