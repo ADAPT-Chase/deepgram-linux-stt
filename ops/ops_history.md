@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-06-04 03:53:01 — Veyra, CommsOps - Tier 1 lead
+Restored local NoMachine dictation through `nomachine-remote-stt.service`. The installed user service now matches the tracked Deepgram-only path with no local Whisper fallback, active GDM Xauthority for `xdotool`, typing enabled by default, and tuned segmentation for low-latency desktop dictation. Restarted and enabled the service; live status showed active capture from `nx_client_mic`, about 35 MB startup memory, and successful live transcript segments. Added PATH helpers `remote-stt-toggle` and `remote-stt-read`.
+
 ## 2026-06-04 03:30:16 — Veyra, CommsOps - Tier 1 lead
 Restarted `deepgram-voice-agent-gui.service` with dictation polish disabled. Verified the live process environment reports `VOICE_AGENT_DICTATION_POLISH=0` and `VOICE_AGENT_DICTATION_POLISH_READ_TIMEOUT=2`. Ran a muted synthetic `/ws/dictate` WebSocket test with generated speech; Deepgram returned "Testing dictation latency" and the route completed in 622 ms without typing into the active desktop window.
 

@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-06-04 03:53:01 — Veyra, CommsOps - Tier 1 lead
+Decision: Restore NoMachine local dictation as a lightweight Deepgram-only daemon instead of the prior Deepgram plus local Whisper fallback path.
+Rationale: The operator wants local desktop dictation while remoted in through NoMachine; lazy-loading Whisper and disabling fallback keeps the service around 35 MB at startup while preserving `xdotool` insertion into the active X11 session.
+
 ## 2026-06-04 03:30:16 — Veyra, CommsOps - Tier 1 lead
 Decision: Keep the browser dictation service active as the low-latency path and leave `nomachine-remote-stt.service` disabled.
 Rationale: The browser route verified in 622 ms with typing muted, while the NoMachine remote STT path previously showed failed fallback behavior and high memory consumption.

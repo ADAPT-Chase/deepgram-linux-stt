@@ -18,13 +18,15 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 signal.signal(signal.SIGUSR1, signal.SIG_IGN)
 
-import numpy as np
 import requests
-from faster_whisper import WhisperModel
 from pynput import keyboard
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel
 
 
 SAMPLE_RATE = 16_000
@@ -448,7 +450,7 @@ def start_capture(source: str) -> subprocess.Popen[bytes]:
     return subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-def transcribe_audio(model: WhisperModel | None, pcm: bytes, config: SttConfig) -> str:
+def transcribe_audio(model: "WhisperModel | None", pcm: bytes, config: SttConfig) -> str:
     """Transcribe signed 16-bit mono PCM bytes with the configured provider."""
 
     if config.provider == "deepgram":
@@ -460,6 +462,8 @@ def transcribe_audio(model: WhisperModel | None, pcm: bytes, config: SttConfig) 
         print("Deepgram returned no transcript; falling back to local STT", flush=True)
 
     if model is None:
+        from faster_whisper import WhisperModel
+
         model = WhisperModel(config.model_name, device="cpu", compute_type="int8")
 
     if model is None:
@@ -469,7 +473,7 @@ def transcribe_audio(model: WhisperModel | None, pcm: bytes, config: SttConfig) 
 
 
 def transcribe_with_faster_whisper(
-    model: WhisperModel,
+    model: "WhisperModel",
     pcm: bytes,
     config: SttConfig,
 ) -> str:
@@ -477,6 +481,8 @@ def transcribe_with_faster_whisper(
 
     if not pcm:
         return ""
+
+    import numpy as np
 
     samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
     if samples.size == 0:
@@ -642,8 +648,10 @@ def main() -> int:
         flush=True,
     )
 
-    model = None
-    if config.provider != "deepgram":
+    model: "WhisperModel | None" = None
+    if config.provider != "deepgram" or config.local_fallback:
+        from faster_whisper import WhisperModel
+
         model = WhisperModel(config.model_name, device="cpu", compute_type="int8")
     capture = start_capture(config.source)
     listener = start_hotkey_listener(hotkey_controller) if config.hotkey_enabled else None
