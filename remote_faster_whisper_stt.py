@@ -6,6 +6,7 @@ from __future__ import annotations
 import audioop
 import os
 import io
+import re
 import signal
 import subprocess
 import sys
@@ -37,6 +38,25 @@ CHUNK_BYTES = SAMPLE_RATE * CHANNELS * SAMPLE_WIDTH_BYTES * CHUNK_MS // 1000
 READBACK_ACTIVE = threading.Event()
 TTS_PROCESS_LOCK = threading.Lock()
 TTS_PROCESS: subprocess.Popen[bytes] | None = None
+TYPE_LOCK = threading.Lock()
+KEY_COMMANDS = {
+    "enter": ("key", "Return"),
+    "return": ("key", "Return"),
+    "new line": ("key", "Return"),
+    "newline": ("key", "Return"),
+    "next line": ("key", "Return"),
+    "new paragraph": ("key", "Return", "Return"),
+    "tab": ("key", "Tab"),
+}
+SPOKEN_PUNCTUATION = (
+    (r"\bquestion mark\b", "?"),
+    (r"\b(?:exclamation point|exclamation mark|exclamation)\b", "!"),
+    (r"\b(?:period|full stop)\b", "."),
+    (r"\bcomma\b", ","),
+    (r"\bcolon\b", ":"),
+    (r"\bsemicolon\b", ";"),
+    (r"\b(?:dash|hyphen)\b", "-"),
+)
 
 
 @dataclass(frozen=True)
@@ -617,10 +637,73 @@ def type_transcript(transcript: str) -> None:
     if not transcript:
         return
 
-    subprocess.run(
-        ["xdotool", "type", "--clearmodifiers", "--delay", "10", f"{transcript} "],
-        check=False,
-    )
+    with TYPE_LOCK:
+        for action in transcript_actions(transcript):
+            if action[0] == "key":
+                for key in action[1:]:
+                    subprocess.run(
+                        ["xdotool", "key", "--clearmodifiers", key],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+            elif action[0] == "text" and action[1]:
+                subprocess.run(
+                    ["xdotool", "type", "--clearmodifiers", "--delay", "10", action[1]],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+
+def transcript_actions(transcript: str) -> list[tuple[str, ...]]:
+    """Convert a transcript into xdotool text/key actions.
+
+    Full-segment commands are intentionally required for navigation keys. This
+    avoids pressing Return when ordinary dictation contains words like "enter".
+    """
+
+    command = normalized_command(transcript)
+    if command.startswith("voice "):
+        command = command.removeprefix("voice ").strip()
+    elif command.startswith("wish "):
+        command = command.removeprefix("wish ").strip()
+
+    action = KEY_COMMANDS.get(command)
+    if action is not None:
+        return [action]
+
+    text = normalize_spoken_punctuation(transcript)
+    if not text:
+        return []
+    return [("text", add_trailing_space(text))]
+
+
+def normalized_command(text: str) -> str:
+    """Normalize transcript text for exact spoken command matching."""
+
+    command = text.strip().lower()
+    command = re.sub(r"[.!?]+$", "", command)
+    command = re.sub(r"\s+", " ", command)
+    return command
+
+
+def normalize_spoken_punctuation(text: str) -> str:
+    """Normalize spoken punctuation words in dictated text."""
+
+    normalized = text.strip()
+    for pattern, replacement in SPOKEN_PUNCTUATION:
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    normalized = re.sub(r"\s+([,.;:?!])", r"\1", normalized)
+    normalized = re.sub(r"\s*-\s*", "-", normalized)
+    return normalized
+
+
+def add_trailing_space(text: str) -> str:
+    """Keep dictation ready for the next word."""
+
+    return text if text.endswith(" ") else f"{text} "
 
 
 def stop_capture(process: subprocess.Popen[bytes]) -> None:

@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-06-04 04:02:24 — Veyra, CommsOps - Tier 1 lead
+Locked down local NoMachine dictation command handling. Added standalone spoken key commands for `enter`, `return`, `new line`, `next line`, `new paragraph`, and `tab`, with optional `voice`/`wish` prefixes. Inline spoken punctuation now works for `question mark`, `comma`, `period`, `colon`, `semicolon`, `dash`, and `exclamation point`. Verified parser output without typing into the desktop, restarted `nomachine-remote-stt.service` muted, and documented the local controls/readback path in `README.md`.
+
 ## 2026-06-04 03:58:11 — Veyra, CommsOps - Tier 1 lead
 Stabilized NoMachine local dictation pause behavior. Muted mode now skips completed audio segments before Deepgram transcription and before text insertion, preventing background audio from generating transcripts or consuming provider calls while paused. Added a 750 ms debounce to Ctrl+Space and SIGUSR1 toggles to prevent repeated hotkey events from flipping state multiple times. Restarted `nomachine-remote-stt.service` muted and verified logs show muted segments being skipped.
 

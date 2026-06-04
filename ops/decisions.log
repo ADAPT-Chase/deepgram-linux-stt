@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-06-04 04:02:24 — Veyra, CommsOps - Tier 1 lead
+Decision: Require full-segment matching for NoMachine dictation navigation keys while allowing inline spoken punctuation.
+Rationale: `enter` and `return` should control the editor when spoken as commands, but normal phrases containing those words must remain text to avoid accidental line breaks during dictation.
+
 ## 2026-06-04 03:58:11 — Veyra, CommsOps - Tier 1 lead
 Decision: Treat NoMachine dictation mute as a hard pause, not just a typing suppression switch.
 Rationale: The NoMachine microphone can carry background room audio; skipping transcription while muted prevents accidental text floods, reduces API usage, and makes Ctrl+Space a reliable pause/resume control.

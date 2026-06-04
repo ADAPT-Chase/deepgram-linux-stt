@@ -113,6 +113,27 @@ Spoken dictation commands:
 - `unmute`, `mute off`, `typing on`
 - `question mark`, `exclamation point`, `period`, `comma`, `colon`, `semicolon`, `dash`
 
+### NoMachine Local Dictation
+
+The active local desktop dictation path is `nomachine-remote-stt.service`.
+It listens to the NoMachine microphone source `nx_client_mic`, transcribes with
+Deepgram `nova-3`, and types into the active X11 field through `xdotool`.
+
+Controls:
+- `Ctrl+Space` or `remote-stt-toggle`: toggle dictation on/off.
+- `Ctrl+Shift+Space` or `remote-stt-read`: read the selected text aloud.
+
+Muted mode is a hard pause: audio segments are skipped locally and are not sent
+to Deepgram. This prevents background audio from creating transcripts while the
+operator is paused.
+
+Local NoMachine spoken commands:
+- Say `enter`, `return`, `new line`, `next line`, `new paragraph`, or `tab` as a
+  standalone segment to send the matching key.
+- Optional prefixes `voice` and `wish` are accepted, for example `voice enter`.
+- Spoken punctuation such as `question mark`, `comma`, and `period` can be used
+  inline with dictated text.
+
 ### Basic Controls
 
 - **Hold ALT**: Starts listening (indicator turns green)
