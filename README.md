@@ -131,9 +131,11 @@ Local NoMachine spoken commands:
 - Say `enter`, `return`, `new line`, `next line`, `new paragraph`, or `tab` as a
   standalone segment to send the matching key.
 - Optional prefixes `voice`, `wish`, `voice command`, and `wish command` are
-  accepted, for example `wish enter` and `voice command return`.
+  accepted, for example `wish enter`, `wish return`, `wish next line`, and
+  `voice command return`.
 - Say `read back selection`, `read selection`, `read selected text`, or
   `read highlighted text` as a standalone segment to read highlighted text aloud.
+  The parser also accepts the common STT variant `re read back selection`.
 - Spoken punctuation such as `question mark`, `comma`, and `period` can be used
   inline with dictated text.
 
