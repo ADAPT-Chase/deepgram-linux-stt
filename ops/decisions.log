@@ -1,5 +1,9 @@
 # Decisions Log
 
+## 2026-06-04 06:58:11 — Veyra, CommsOps - Tier 1 lead
+Decision: Use exact full-segment command matching for browser dictation navigation and readback, matching the NoMachine daemon.
+Rationale: Browser dictation must not press Return from ordinary prose such as `I would like to return later`; `wish` remains a strict synonym for `voice` only when the segment is an intentional command.
+
 ## 2026-06-04 06:35:37 — Veyra, CommsOps - Tier 1 lead
 Decision: Treat `wish` as a strict synonym for the `voice` command prefix, while keeping navigation words command-only when the normalized whole segment matches.
 Rationale: The operator can say `wish return` or `wish next line` for control, but sentences such as `I would like to return later` must not press Return during dictation.

@@ -8,7 +8,6 @@ server holds the Deepgram API key and relays frames to the Voice Agent API.
 from __future__ import annotations
 
 import asyncio
-import audioop
 import io
 import json
 import logging
@@ -17,6 +16,7 @@ import re
 import subprocess
 import threading
 import uuid
+import warnings
 import wave
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +28,14 @@ import uvicorn
 import websockets
 from fastapi import Request, FastAPI, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        message="'audioop' is deprecated.*",
+    )
+    import audioop
 
 
 APP_NAME = "Deepgram Voice Agent GUI"
@@ -87,11 +95,24 @@ DEFAULT_DICTATION_KEYTERMS = (
 )
 TYPE_LOCK = threading.Lock()
 DICTATION_KEY_MARKER = "\uE000KEY_{key}\uE000"
-DICTATION_COMMAND_REPLACEMENTS = (
-    (r"\bnew paragraph\b", DICTATION_KEY_MARKER.format(key="Return") * 2),
-    (r"\b(?:new line|newline|next line)\b", DICTATION_KEY_MARKER.format(key="Return")),
-    (r"\b(?:enter|return)\b", DICTATION_KEY_MARKER.format(key="Return")),
-    (r"\btab\b", DICTATION_KEY_MARKER.format(key="Tab")),
+DICTATION_KEY_COMMANDS = {
+    "enter": ("key", "Return"),
+    "return": ("key", "Return"),
+    "new line": ("key", "Return"),
+    "newline": ("key", "Return"),
+    "next line": ("key", "Return"),
+    "new paragraph": ("key", "Return", "Return"),
+    "tab": ("key", "Tab"),
+}
+DICTATION_READBACK_COMMANDS = {
+    "read back selection",
+    "read selection",
+    "read selected text",
+    "read highlighted text",
+    "read this",
+    "read it back",
+}
+DICTATION_PUNCTUATION_REPLACEMENTS = (
     (r"\bquestion mark\b", "?"),
     (r"\b(?:exclamation point|exclamation mark|exclamation)\b", "!"),
     (r"\b(?:period|full stop)\b", "."),
@@ -108,11 +129,6 @@ DICTATION_MUTE_OFF_RE = re.compile(
     r"^\s*(?:unmute|mute off|typing on|dictation on|start typing)\s*[.!?]?\s*$",
     re.IGNORECASE,
 )
-DICTATION_KEY_COMMAND_RE = re.compile(
-    r"\b(?:new paragraph|new line|newline|next line|enter|return|tab)\b",
-    re.IGNORECASE,
-)
-
 LOGGER = logging.getLogger("deepgram_voice_agent_gui")
 ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$")
 SECRET_LINE_RE = re.compile(
@@ -1555,13 +1571,16 @@ def type_dictation_text(text: str) -> None:
     with TYPE_LOCK:
         for action, value in dictation_actions(text):
             if action == "key":
-                subprocess.run(
-                    ["xdotool", "key", "--clearmodifiers", value],
-                    check=False,
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+                for key in value.split():
+                    subprocess.run(
+                        ["xdotool", "key", "--clearmodifiers", key],
+                        check=False,
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+            elif action == "readback":
+                threading.Thread(target=read_selected_text, daemon=True).start()
             elif value:
                 subprocess.run(
                     ["xdotool", "type", "--clearmodifiers", "--delay", "2", value],
@@ -1572,11 +1591,35 @@ def type_dictation_text(text: str) -> None:
                 )
 
 
+def read_selected_text() -> None:
+    """Read highlighted desktop text aloud using the NoMachine STT readback path."""
+
+    try:
+        from remote_faster_whisper_stt import read_selected_text as remote_read_selected_text
+    except Exception as exc:
+        LOGGER.warning("Dictation readback unavailable: %s", exc)
+        return
+    remote_read_selected_text()
+
+
 def dictation_actions(text: str) -> list[tuple[str, str]]:
     """Convert spoken punctuation and key commands into xdotool actions."""
 
+    command = normalized_dictation_command(text)
+    if command.startswith("voice "):
+        command = command.removeprefix("voice ").strip()
+    elif command.startswith("wish "):
+        command = command.removeprefix("wish ").strip()
+
+    if command in DICTATION_READBACK_COMMANDS:
+        return [("readback", "")]
+
+    key_action = DICTATION_KEY_COMMANDS.get(command)
+    if key_action is not None:
+        return [("key", " ".join(key_action[1:]))]
+
     rendered = f" {text.strip()} "
-    for pattern, replacement in DICTATION_COMMAND_REPLACEMENTS:
+    for pattern, replacement in DICTATION_PUNCTUATION_REPLACEMENTS:
         rendered = re.sub(pattern, f" {replacement} ", rendered, flags=re.IGNORECASE)
     rendered = normalize_spoken_punctuation(rendered)
 
@@ -1590,6 +1633,26 @@ def dictation_actions(text: str) -> list[tuple[str, str]]:
     add_text_action(actions, rendered[cursor:])
     add_trailing_space(actions)
     return actions
+
+
+def normalized_dictation_command(text: str) -> str:
+    """Normalize transcript text for exact spoken command matching."""
+
+    command = text.strip().lower()
+    command = re.sub(r"[.!?]+$", "", command)
+    command = re.sub(r"\s+", " ", command)
+    return command
+
+
+def is_dictation_control_command(text: str) -> bool:
+    """Return true when the transcript is an exact non-text dictation command."""
+
+    command = normalized_dictation_command(text)
+    if command.startswith("voice "):
+        command = command.removeprefix("voice ").strip()
+    elif command.startswith("wish "):
+        command = command.removeprefix("wish ").strip()
+    return command in DICTATION_KEY_COMMANDS or command in DICTATION_READBACK_COMMANDS
 
 
 def dictation_mute_command(text: str) -> bool | None:
@@ -1676,7 +1739,7 @@ def should_polish_dictation_text(text: str) -> bool:
     max_chars = int(os.environ.get("VOICE_AGENT_DICTATION_POLISH_MAX_CHARS", "1200"))
     if len(text) < min_chars or len(text) > max_chars:
         return False
-    return DICTATION_KEY_COMMAND_RE.search(text) is None
+    return not is_dictation_control_command(text)
 
 
 def extract_chat_completion_text(payload: dict[str, Any]) -> str:

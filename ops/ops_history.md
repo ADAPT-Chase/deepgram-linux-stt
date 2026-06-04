@@ -1,5 +1,8 @@
 # Ops History
 
+## 2026-06-04 06:58:11 — Veyra, CommsOps - Tier 1 lead
+Locked browser dictation command handling to match the NoMachine daemon grammar. `voice` and `wish` now work as equivalent exact command prefixes for `enter`, `return`, `next line`, and selected-text readback, while ordinary prose containing those words remains typed text. Added browser parser regression coverage, suppressed the restart-only `audioop` deprecation warning, and verified parser output without typing into the desktop.
+
 ## 2026-06-04 06:35:37 — Veyra, CommsOps - Tier 1 lead
 Locked down NoMachine dictation command regressions for `wish`/`voice` parity. Added explicit coverage for `wish return`, `wish next line`, and ordinary prose containing `return` so spoken navigation remains command-only while normal dictation remains text.
 
