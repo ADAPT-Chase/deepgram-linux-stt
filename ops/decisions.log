@@ -1,5 +1,16 @@
 # Decisions Log
 
+## 2026-07-28 17:15:00 — Codex
+Decision: Benchmark the NoMachine Deepgram `nova-3` dictation daemon first, Vocalinux second,
+and browser Deepgram dictation third; evaluate `n-voice` plus Pipecat separately as a
+conversational Voice-to-Nova stack rather than as a standalone transcription engine.
+Rationale: The NoMachine daemon is the smallest already-tuned path for the operator's current
+desktop, has 6,863 prior transcript segments, direct X11 typing, conservative spoken-command
+handling, and no LLM post-processing latency. Vocalinux is the privacy-first offline fallback,
+but its current `tiny.en-q5_1` model is a lower-accuracy baseline even though larger local models
+are installed. `n-voice` owns routing, transcripts, memory, and agent delivery, while Pipecat
+adds the full speech-to-agent-to-speech path; enabling either would confound a pure STT test.
+
 ## 2026-06-04 09:27:33 — Veyra, CommsOps - Tier 1 lead
 Decision: Treat `wish` and `voice` as durable equivalent control words and bias Deepgram toward the exact local command vocabulary.
 Rationale: The operator is dictating through NoMachine and needs short hands-free controls to survive realistic STT variants. Keyterm biasing improves recognition, while exact full-segment command matching still prevents ordinary prose such as `I would like to return later` from pressing Return.

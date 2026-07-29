@@ -1,5 +1,15 @@
 # Ops History
 
+## 2026-07-28 17:15:00 — Codex
+Established a clean transcription benchmark state. Disabled and stopped the Vocalinux login
+autostart; the Deepgram GUI and LLM proxy; the NoMachine Deepgram STT and audio shim; the
+Pipecat gateway, Switch agent, Hermes agents, and health timer; and the complete `n-voice`
+service set, including its memory ingest, timers, and path triggers. Verified that no relevant
+processes, capture clients, or TCP listeners survived. Then manually started only
+`nomachine-audio-fix.service` and `nomachine-remote-stt.service` as the first isolated candidate;
+both remain disabled at boot. The candidate started successfully with Deepgram `nova-3`, typing
+enabled, a 650 ms silence boundary, and no competing transcriber.
+
 ## 2026-06-04 09:27:33 — Veyra, CommsOps - Tier 1 lead
 Locked down the local dictation control grammar after live operator validation. Added Deepgram keyterm biasing for `wish`, `voice`, selected-text readback, and spoken navigation phrases; added `enter for next line`, `return for next line`, and `go to next line` as exact Return-key commands in both the browser dictation path and NoMachine daemon path. Verified parser regressions with X11 environment, restarted `deepgram-voice-agent-gui.service` and `nomachine-remote-stt.service`, restored NoMachine typing state to `on`, and confirmed `/api/health` remained OK.
 
