@@ -20,6 +20,7 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+temp_auto_push.bat
 MANIFEST
 
 # Virtual Environment
@@ -38,8 +39,9 @@ transcriptions.txt
 remote_transcriptions.txt
 
 # IDE
-.vscode/
 .idea/
 
 # OS
 .DS_Store
+.gitignore
+branch_structure.json
