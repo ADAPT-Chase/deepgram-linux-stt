@@ -1,5 +1,15 @@
 # Ops History
 
+## 2026-07-28 17:35:00 — Codex
+Completed candidate 3 and stopped its disabled Deepgram GUI backend. The browser microphone route
+recognized the operator's words but fragmented, merged, and reformatted utterances, including one
+`one two` to `1.2` conversion and two blank segments. Selected Vocalinux
+`medium.en-q5_0` for the larger offline test, downloaded the 539,225,533-byte model from the
+repository-configured Hugging Face source, and verified SHA-256
+`76733e26ad8fe1c7a5bf7531a9d41917b2adc0f20f2e4f5531688a8c6cd88eb0` against the linked object
+hash. Launched it alone through the transient benchmark service; Intel Vulkan loaded the model
+in 1.93 seconds at approximately 1.0 GB memory. Reasserted both autostart controls as off.
+
 ## 2026-07-28 17:31:00 — Codex
 Corrected candidate 3 browser launch after the standalone Chrome window closed. Detected the
 operator's newly opened logged-in Chrome session, sent the Adapt Dictation URL to that exact

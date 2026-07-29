@@ -23,6 +23,9 @@ The workstation's overlapping transcription and voice stacks were isolated succe
   exposed through the raw Deepgram browser-dictation page with LLM polish disabled.
 - Candidate 3 is open as an active tab in the operator's existing logged-in Chrome session after
   the separate benchmark window closed.
+- Candidate 3 showed split, merged, reformatted, and blank segments and is now stopped.
+- Candidate 4 is Vocalinux `medium.en-q5_0`, loaded alone on Intel Vulkan from a checksum-verified
+  539,225,533-byte model at approximately 1.0 GB memory.
 
 Recommended comparison order:
 

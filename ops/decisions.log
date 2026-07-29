@@ -1,5 +1,13 @@
 # Decisions Log
 
+## 2026-07-28 17:35:00 — Codex
+Decision: Run the larger Vocalinux comparison with the English-specific quantized
+`medium.en-q5_0` model.
+Rationale: It is materially larger than `small.en-q5_1` while its 539 MB verified binary and
+approximately 1.0 GB loaded footprint remain practical on this 15 GB Intel Vulkan host. The
+full 1.46 GB medium model is unjustified while the root filesystem is already 98% utilized, and
+candidate 3's main failure was segmentation rather than raw provider availability.
+
 ## 2026-07-28 17:29:00 — Codex
 Decision: Rank Vocalinux as the offline/privacy fallback rather than the default noisy-room
 dictation path, and advance the benchmark to raw browser Deepgram dictation without LLM polish.
