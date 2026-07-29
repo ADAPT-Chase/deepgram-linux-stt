@@ -30,6 +30,8 @@ The workstation's overlapping transcription and voice stacks were isolated succe
   and created delayed partial/full duplicates through the uncancelled inference queue.
 - Final baseline: every tested transcription, Pipecat, and `n-voice` component is stopped and
   disabled; no relevant capture process or listener remains.
+- Candidate 5 is staged alone with Vosk small using a verified 68 MB English model at
+  approximately 206 MB loaded memory; its live acceptance result is pending.
 
 Recommended comparison order:
 

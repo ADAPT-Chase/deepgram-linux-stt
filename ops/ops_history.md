@@ -1,5 +1,13 @@
 # Ops History
 
+## 2026-07-28 17:46:00 — Codex
+Staged candidate 5 using Vocalinux's Vosk engine. Downloaded the configured
+`vosk-model-small-en-us-0.15` archive from Alpha Cephei, verified the expected 41,205,931-byte
+length and ZIP integrity, and extracted the 68 MB model into the Vocalinux data directory.
+Switched the transient benchmark configuration to Vosk small, launched it alone, and verified
+successful engine initialization at approximately 206 MB memory. Reasserted both Vocalinux
+autostart controls as off; all Deepgram, Pipecat, and `n-voice` services remain disabled.
+
 ## 2026-07-28 17:41:00 — Codex
 Repeated the Vocalinux medium-model test with the operator using the correct start, speak, stop,
 and wait sequence. The model recognized the target sentence accurately, but short-chunk inference

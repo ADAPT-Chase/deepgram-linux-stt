@@ -1,5 +1,13 @@
 # Decisions Log
 
+## 2026-07-28 17:46:00 — Codex
+Decision: Evaluate Vosk small as a separate low-latency offline candidate and evaluate xAI
+Realtime Voice separately as a full voice-agent lane.
+Rationale: Vosk is local STT with a compact model and deterministic resource profile. xAI's
+current realtime offering combines streaming transcription, speech generation, reasoning, and
+tools, so comparing it directly to a dictation engine would conflate transcription quality with
+agent behavior.
+
 ## 2026-07-28 17:41:00 — Codex
 Decision: Reject Vocalinux `medium.en-q5_0` for live dictation on this Intel Vulkan host despite
 its best-in-test normalized accuracy.
