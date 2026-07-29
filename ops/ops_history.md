@@ -1,5 +1,16 @@
 # Ops History
 
+## 2026-07-28 18:17:00 — Codex
+Rejected candidate 5 after the operator's live phrase was transcribed as
+`team dead build reliable russian and well assembly system team madame build`.
+Stopped and reset the transient Vocalinux/Vosk service and kept both Vocalinux
+autostart controls off. Advanced xAI to the separate cloud-STT and
+speech-to-Nova lane. The xAI REST endpoint accepted the microphone WAVs, but
+both xAI and the Deepgram control returned empty text for those same captures,
+so they were classified as missed-speech samples rather than provider accuracy
+results. No standalone dictation engine is active while the xAI Nova voice lane
+is tested.
+
 ## 2026-07-28 17:46:00 — Codex
 Staged candidate 5 using Vocalinux's Vosk engine. Downloaded the configured
 `vosk-model-small-en-us-0.15` archive from Alpha Cephei, verified the expected 41,205,931-byte

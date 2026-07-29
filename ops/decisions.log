@@ -1,5 +1,14 @@
 # Decisions Log
 
+## 2026-07-28 18:17:00 — Codex
+Decision: Reject Vosk small for this operator and do not spend time on a larger
+Vosk model before testing xAI.
+Rationale: The live sentence failed on multiple domain-critical words,
+including Team ADAPT, Rust, WebAssembly, and the second repeated clause. That
+error profile is materially worse than both Deepgram and Vocalinux medium, so
+model escalation has less leverage than evaluating xAI's current dedicated STT
+and realtime speech APIs.
+
 ## 2026-07-28 17:46:00 — Codex
 Decision: Evaluate Vosk small as a separate low-latency offline candidate and evaluate xAI
 Realtime Voice separately as a full voice-agent lane.
