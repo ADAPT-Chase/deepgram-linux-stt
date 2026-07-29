@@ -1,5 +1,12 @@
 # Ops History
 
+## 2026-07-28 17:31:00 — Codex
+Corrected candidate 3 browser launch after the standalone Chrome window closed. Detected the
+operator's newly opened logged-in Chrome session, sent the Adapt Dictation URL to that exact
+existing browser as a new tab, and activated the window. Verified the visible title is
+`Adapt Dictation - Google Chrome` while the raw Deepgram backend remains healthy and listening
+on 127.0.0.1:18087.
+
 ## 2026-07-28 17:29:00 — Codex
 Completed the Vocalinux acceptance test. The offline `small.en-q5_1` model transcribed both
 five-word phrases exactly but first injected the false non-speech annotation `(engine revving)`.

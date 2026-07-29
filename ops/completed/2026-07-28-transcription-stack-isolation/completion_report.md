@@ -21,6 +21,8 @@ The workstation's overlapping transcription and voice stacks were isolated succe
   inference was about 1.91 seconds with a two-second silence boundary.
 - Candidates 1 and 2 are stopped. Candidate 3 is the only active transcription backend and is
   exposed through the raw Deepgram browser-dictation page with LLM polish disabled.
+- Candidate 3 is open as an active tab in the operator's existing logged-in Chrome session after
+  the separate benchmark window closed.
 
 Recommended comparison order:
 
