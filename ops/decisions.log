@@ -1,5 +1,13 @@
 # Decisions Log
 
+## 2026-07-28 17:27:00 — Codex
+Decision: Test Vocalinux with `small.en-q5_1` instead of its prior `tiny.en-q5_1` configuration,
+using the existing double-Ctrl toggle and a transient non-enabled service.
+Rationale: The larger quantized English model is already installed and provides a fairer offline
+accuracy comparison against Deepgram `nova-3`. Keeping activation operator-controlled avoids
+the continuously open microphone behavior that produced unrelated background segments during
+the first candidate test.
+
 ## 2026-07-28 17:25:00 — Codex
 Decision: Use 60% internal-microphone gain for the current Deepgram dictation benchmark and
 treat `Ctrl+Space` strictly as an edge-triggered mute toggle, not push-to-talk.

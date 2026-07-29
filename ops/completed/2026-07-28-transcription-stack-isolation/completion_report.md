@@ -15,6 +15,10 @@ The workstation's overlapping transcription and voice stacks were isolated succe
 - The initial acceptance attempt failed because typing was toggled to `muted` and microphone gain
   was 27%. Typing is restored, gain is normalized to 60%, Deepgram returned a transcript, and an
   isolated X11 text-injection probe passed exactly.
+- Candidate 1 subsequently transcribed the acceptance phrase exactly twice, but its continuously
+  open physical-microphone path also emitted unrelated background segments.
+- Candidate 1 is stopped and candidate 2 is running alone as a transient Vocalinux service using
+  the offline `small.en-q5_1` model on Intel Vulkan.
 
 Recommended comparison order:
 

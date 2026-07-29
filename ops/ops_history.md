@@ -1,5 +1,15 @@
 # Ops History
 
+## 2026-07-28 17:27:00 — Codex
+Completed the first candidate's acceptance phrase with two exact Deepgram transcriptions after
+the input repair. The continuously open physical microphone also produced unrelated background
+segments, so candidate 1 passes accuracy on clear speech but carries a false-positive and cloud
+latency penalty. Stopped and reset the disabled NoMachine STT/audio units. Reconfigured Vocalinux
+from `tiny.en-q5_1` to the installed `small.en-q5_1` offline model, kept both autostart controls
+off, and launched it alone through a transient `vocalinux-benchmark.service`. Verified the model
+loaded on Intel Vulkan in 0.53 seconds with no competing transcriber; startup memory was
+approximately 584 MB.
+
 ## 2026-07-28 17:25:00 — Codex
 Repaired the first isolated dictation candidate after the operator reported no typed output.
 The daemon had received three `Ctrl+Space` toggle events and ended in `muted`, while the active
