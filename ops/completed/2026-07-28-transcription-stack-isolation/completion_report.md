@@ -10,6 +10,8 @@ The workstation's overlapping transcription and voice stacks were isolated succe
 - A zero-listener baseline was verified before testing.
 - Only the first candidate, NoMachine Deepgram `nova-3` dictation, was started manually.
 - The first candidate remains disabled at boot and can be stopped without altering its config.
+- The first candidate has one verified 16 kHz capture stream on the physical PipeWire microphone;
+  the NoMachine virtual microphone source is not currently present.
 
 Recommended comparison order:
 
