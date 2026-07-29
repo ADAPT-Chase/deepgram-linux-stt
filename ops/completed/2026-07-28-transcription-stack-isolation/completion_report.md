@@ -12,6 +12,9 @@ The workstation's overlapping transcription and voice stacks were isolated succe
 - The first candidate remains disabled at boot and can be stopped without altering its config.
 - The first candidate has one verified 16 kHz capture stream on the physical PipeWire microphone;
   the NoMachine virtual microphone source is not currently present.
+- The initial acceptance attempt failed because typing was toggled to `muted` and microphone gain
+  was 27%. Typing is restored, gain is normalized to 60%, Deepgram returned a transcript, and an
+  isolated X11 text-injection probe passed exactly.
 
 Recommended comparison order:
 

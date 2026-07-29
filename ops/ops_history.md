@@ -1,5 +1,15 @@
 # Ops History
 
+## 2026-07-28 17:25:00 — Codex
+Repaired the first isolated dictation candidate after the operator reported no typed output.
+The daemon had received three `Ctrl+Space` toggle events and ended in `muted`, while the active
+internal microphone was set to 27% (`-34.39 dB`). Restored typing through the supported
+`remote-stt-toggle on` path and set the PipeWire input to 60% (`-13.31 dB`) after a 100% signal
+probe showed clipping. Verified all three stages independently: a live 16 kHz capture stream,
+a successful Deepgram `nova-3` transcript response, and an exact X11 injection result of
+`stt-injection-probe-ok`. The daemon remains active only for the isolated test and disabled at
+boot.
+
 ## 2026-07-28 17:15:00 — Codex
 Established a clean transcription benchmark state. Disabled and stopped the Vocalinux login
 autostart; the Deepgram GUI and LLM proxy; the NoMachine Deepgram STT and audio shim; the

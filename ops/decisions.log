@@ -1,5 +1,13 @@
 # Decisions Log
 
+## 2026-07-28 17:25:00 — Codex
+Decision: Use 60% internal-microphone gain for the current Deepgram dictation benchmark and
+treat `Ctrl+Space` strictly as an edge-triggered mute toggle, not push-to-talk.
+Rationale: At 27% the operator's speech did not produce a transcript, while a 100% diagnostic
+capture reached the provider but peaked at clipping. Sixty percent restores threshold margin
+without preserving the clipped signal. Independent X11 injection succeeded, so changing the
+typing implementation would not address the observed failure.
+
 ## 2026-07-28 17:15:00 — Codex
 Decision: Benchmark the NoMachine Deepgram `nova-3` dictation daemon first, Vocalinux second,
 and browser Deepgram dictation third; evaluate `n-voice` plus Pipecat separately as a
