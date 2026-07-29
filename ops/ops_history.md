@@ -1,5 +1,14 @@
 # Ops History
 
+## 2026-07-28 17:29:00 — Codex
+Completed the Vocalinux acceptance test. The offline `small.en-q5_1` model transcribed both
+five-word phrases exactly but first injected the false non-speech annotation `(engine revving)`.
+Measured local inference at 1.906-1.946 seconds with a two-second silence boundary, approximately
+256 MB steady memory, and 584 MB startup peak. Stopped the transient Vocalinux service with both
+autostart flags still off. Started only the disabled Deepgram GUI service for raw browser
+dictation, verified local health and the 127.0.0.1:18087 listener, and opened the dedicated
+`https://dg.adaptdev.ai/dictation` page in Chrome for candidate 3.
+
 ## 2026-07-28 17:27:00 — Codex
 Completed the first candidate's acceptance phrase with two exact Deepgram transcriptions after
 the input repair. The continuously open physical microphone also produced unrelated background

@@ -1,5 +1,13 @@
 # Decisions Log
 
+## 2026-07-28 17:29:00 — Codex
+Decision: Rank Vocalinux as the offline/privacy fallback rather than the default noisy-room
+dictation path, and advance the benchmark to raw browser Deepgram dictation without LLM polish.
+Rationale: Vocalinux achieved exact lexical recognition but emitted a false environmental-sound
+annotation and required about 3.9 seconds from silence boundary through inference. The browser
+route bypasses the NoMachine virtual microphone, retains Deepgram `nova-3`, and avoids both the
+continuous system microphone listener and post-STT model latency.
+
 ## 2026-07-28 17:27:00 — Codex
 Decision: Test Vocalinux with `small.en-q5_1` instead of its prior `tiny.en-q5_1` configuration,
 using the existing double-Ctrl toggle and a transient non-enabled service.

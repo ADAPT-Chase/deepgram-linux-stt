@@ -17,8 +17,10 @@ The workstation's overlapping transcription and voice stacks were isolated succe
   isolated X11 text-injection probe passed exactly.
 - Candidate 1 subsequently transcribed the acceptance phrase exactly twice, but its continuously
   open physical-microphone path also emitted unrelated background segments.
-- Candidate 1 is stopped and candidate 2 is running alone as a transient Vocalinux service using
-  the offline `small.en-q5_1` model on Intel Vulkan.
+- Candidate 2 transcribed both phrases exactly but inserted `(engine revving)` first; its local
+  inference was about 1.91 seconds with a two-second silence boundary.
+- Candidates 1 and 2 are stopped. Candidate 3 is the only active transcription backend and is
+  exposed through the raw Deepgram browser-dictation page with LLM polish disabled.
 
 Recommended comparison order:
 
