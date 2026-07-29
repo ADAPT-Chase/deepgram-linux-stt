@@ -1,5 +1,14 @@
 # Ops History
 
+## 2026-07-28 17:41:00 — Codex
+Repeated the Vocalinux medium-model test with the operator using the correct start, speak, stop,
+and wait sequence. The model recognized the target sentence accurately, but short-chunk inference
+took 6.09-6.47 seconds with RTF 1.14-1.46. Vocalinux continued segmenting while prior inference
+was running, queued partial chunks, and injected delayed partial/full duplicates after stop.
+Confirmed this was internal inference backlog rather than operator misuse. Stopped the transient
+service and verified that Vocalinux, Deepgram, Pipecat, `n-voice`, their listeners, and their
+autostart paths are all inactive and disabled.
+
 ## 2026-07-28 17:35:00 — Codex
 Completed candidate 3 and stopped its disabled Deepgram GUI backend. The browser microphone route
 recognized the operator's words but fragmented, merged, and reformatted utterances, including one

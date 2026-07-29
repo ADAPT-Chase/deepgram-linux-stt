@@ -26,6 +26,10 @@ The workstation's overlapping transcription and voice stacks were isolated succe
 - Candidate 3 showed split, merged, reformatted, and blank segments and is now stopped.
 - Candidate 4 is Vocalinux `medium.en-q5_0`, loaded alone on Intel Vulkan from a checksum-verified
   539,225,533-byte model at approximately 1.0 GB memory.
+- Candidate 4 achieved the best normalized accuracy but short chunks ran slower than real time
+  and created delayed partial/full duplicates through the uncancelled inference queue.
+- Final baseline: every tested transcription, Pipecat, and `n-voice` component is stopped and
+  disabled; no relevant capture process or listener remains.
 
 Recommended comparison order:
 

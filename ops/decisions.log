@@ -1,5 +1,14 @@
 # Decisions Log
 
+## 2026-07-28 17:41:00 — Codex
+Decision: Reject Vocalinux `medium.en-q5_0` for live dictation on this Intel Vulkan host despite
+its best-in-test normalized accuracy.
+Rationale: Short-segment inference is slower than real time, and the current pipeline lacks
+backpressure or queued-segment cancellation on stop. This causes delayed partial and duplicate
+injection. Prefer direct Deepgram `nova-3` for daily low-latency dictation with a default-muted
+activation policy; retain Vocalinux small as the practical offline fallback after filtering
+parenthesized non-speech annotations.
+
 ## 2026-07-28 17:35:00 — Codex
 Decision: Run the larger Vocalinux comparison with the English-specific quantized
 `medium.en-q5_0` model.
